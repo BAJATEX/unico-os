@@ -5,7 +5,7 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata = {
   title: 'ÚNICO OS | Commander',
   description: 'Sistema Operativo Enterprise',
-  manifest: '/manifest.json', // ¡Esto activa la instalación!
+  manifest: '/manifest.json', // VITAL PARA INSTALAR
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -15,7 +15,7 @@ export const metadata = {
     width: 'device-width',
     initialScale: 1,
     maximumScale: 1,
-    userScalable: false, // Bloquea el zoom para que se sienta como App nativa
+    userScalable: false, // Bloquea zoom (Look nativo)
   }
 }
 
