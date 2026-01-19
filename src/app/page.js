@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { hasPerm, canManageUsers, ROLE_PERMS } from "@/lib/authz";
 import {
   LayoutDashboard,
   Package,
@@ -16,31 +17,9 @@ import {
   Info,
   Megaphone,
   Bell,
-  Upload,
-  CheckCircle,
-  DollarSign,
   Menu,
   Shield
 } from "lucide-react";
-
-/**
- * ROLES Y PERMISOS
- * Definición centralizada de qué puede ver cada rol.
- */
-const ROLE_PERMS = {
-  owner: ["dashboard", "orders", "products", "marketing", "settings", "users"],
-  admin: ["dashboard", "orders", "products", "marketing", "settings", "users"],
-  ops: ["dashboard", "orders", "products"],
-  sales: ["dashboard", "orders"],
-  marketing: ["dashboard", "marketing", "settings"],
-  viewer: ["dashboard"]
-};
-
-/** Verifica si un rol tiene acceso a un tab específico */
-function hasPerm(role, tab) {
-  const r = (role || "viewer").toLowerCase();
-  return (ROLE_PERMS[r] || ROLE_PERMS.viewer).includes(tab);
-}
 
 /** Formateador de moneda MXN */
 function moneyMXN(v) {
@@ -76,7 +55,7 @@ export default function AdminPage() {
   }, []);
 
   if (loading) return <LoadingScreen />;
-  if (!session) return <LoginScreen onSuccess={() => {}} />;
+  if (!session) return <LoginScreen />;
 
   return <AdminDashboard />;
 }
@@ -148,6 +127,7 @@ function LoginScreen() {
               autoComplete="email"
             />
           </div>
+
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase">Contraseña</label>
             <input
@@ -164,7 +144,7 @@ function LoginScreen() {
 
           <button
             disabled={busy}
-            className="w-full bg-unico-600 hover:bg-unico-700 text-white font-extrabold py-4 rounded-2xl shadow-lg"
+            className="w-full bg-unico-600 hover:bg-unico-700 text-white font-extrabold py-4 rounded-2xl shadow-lg disabled:opacity-60"
           >
             {busy ? "Procesando..." : mode === "login" ? "ENTRAR" : "CREAR CUENTA"}
           </button>
@@ -200,6 +180,9 @@ function AdminDashboard() {
   const [helpMsg, setHelpMsg] = useState(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // anti-spam notifications
+  const lastNotifyRef = useRef({ lowStockAt: 0, paidOrdersAt: 0 });
 
   const selectedMembership = useMemo(
     () => memberships.find((m) => String(m.org_id) === String(selectedOrgId)) || null,
@@ -280,9 +263,13 @@ function AdminDashboard() {
     if (!selectedOrgId || !notificationsEnabled) return;
     if (!hasPerm(role, "orders") && !hasPerm(role, "products")) return;
 
+    const COOLDOWN = 10 * 60 * 1000; // 10 min
+
     const runScanner = async () => {
       try {
-        if (hasPerm(role, "products")) {
+        const now = Date.now();
+
+        if (hasPerm(role, "products") && now - lastNotifyRef.current.lowStockAt > COOLDOWN) {
           const { data: lowStock } = await supabase
             .from("products")
             .select("name, stock")
@@ -297,10 +284,11 @@ function AdminDashboard() {
               body: `${lowStock[0].name}: Quedan ${lowStock[0].stock}`,
               icon: "/icon-192.png"
             });
+            lastNotifyRef.current.lowStockAt = now;
           }
         }
 
-        if (hasPerm(role, "orders")) {
+        if (hasPerm(role, "orders") && now - lastNotifyRef.current.paidOrdersAt > COOLDOWN) {
           const { count } = await supabase
             .from("orders")
             .select("*", { count: "exact", head: true })
@@ -312,6 +300,7 @@ function AdminDashboard() {
               body: `Tienes ${count} pedidos pagados por procesar.`,
               icon: "/icon-192.png"
             });
+            lastNotifyRef.current.paidOrdersAt = now;
           }
         }
       } catch (e) {
@@ -381,7 +370,7 @@ function AdminDashboard() {
           <div className="relative group">
             <select
               className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold text-slate-700 outline-none"
-              value={selectedOrgId}
+              value={selectedOrgId || ""}
               onChange={(e) => setSelectedOrgId(e.target.value)}
             >
               {orgs.map((org) => (
@@ -520,8 +509,7 @@ function AdminDashboard() {
 /* =========================================================================================
    VIEWS (DASHBOARD, PRODUCTS, ORDERS, ETC)
    ========================================================================================= */
-
-/** DASHBOARD VIEW */
+///** DASHBOARD VIEW */
 function DashboardView({ orgId, setHelp }) {
   const [finance, setFinance] = useState({
     gross: 0,
@@ -637,6 +625,7 @@ function ProductsView({ orgId, setHelp, role }) {
   const [products, setProducts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     supabase
@@ -647,14 +636,31 @@ function ProductsView({ orgId, setHelp, role }) {
       .then(({ data }) => setProducts(data || []));
   }, [orgId, refresh]);
 
-  const canWrite = hasPerm(role, "products") && (role === "owner" || role === "admin" || role === "ops");
+  const canWrite = ["owner", "admin", "ops"].includes(String(role || "").toLowerCase()) && hasPerm(role, "products");
+
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return products;
+    return (products || []).filter((p) => {
+      const name = String(p.name || "").toLowerCase();
+      const sku = String(p.sku || "").toLowerCase();
+      const cat = String(p.category || "").toLowerCase();
+      return name.includes(query) || sku.includes(query) || cat.includes(query);
+    });
+  }, [products, q]);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div className="flex items-center gap-2 w-full md:w-auto">
           <Search className="text-slate-400" size={20} />
-          <input type="text" placeholder="Buscar..." className="outline-none text-sm w-full md:w-64" />
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar por nombre, SKU o categoría..."
+            className="outline-none text-sm w-full md:w-80 bg-transparent"
+          />
         </div>
 
         {canWrite && (
@@ -680,7 +686,7 @@ function ProductsView({ orgId, setHelp, role }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {products.map((p) => (
+            {filtered.map((p) => (
               <tr key={p.id} className="hover:bg-slate-50">
                 <td className="px-6 py-4">
                   <img
@@ -723,8 +729,8 @@ function ProductsView({ orgId, setHelp, role }) {
           </tbody>
         </table>
 
-        {products.length === 0 ? (
-          <div className="p-10 text-center text-slate-500 text-sm">No hay productos en esta organización.</div>
+        {filtered.length === 0 ? (
+          <div className="p-10 text-center text-slate-500 text-sm">No hay resultados.</div>
         ) : null}
       </div>
 
@@ -773,7 +779,12 @@ function CreateProductModal({ orgId, onClose, onSuccess, setHelp }) {
       let finalImageUrl = "/icon-192.png";
 
       if (imageFile) {
-        const cleanName = String(imageFile.name || "img").replace(/\s+/g, "-");
+        const cleanName = String(imageFile.name || "img")
+          .trim()
+          .replace(/[^\w.\-]+/g, "-")
+          .replace(/\-+/g, "-")
+          .slice(0, 120);
+
         const fileName = `${orgId}/${Date.now()}-${cleanName}`;
 
         const { error: upErr } = await supabase.storage.from("products").upload(fileName, imageFile, {
@@ -912,7 +923,8 @@ function OrdersView({ orgId, setHelp, role }) {
   const [orders, setOrders] = useState([]);
   const [refresh, setRefresh] = useState(0);
 
-  const canWrite = hasPerm(role, "orders") && (role === "owner" || role === "admin" || role === "ops" || role === "sales");
+  const roleNorm = String(role || "").toLowerCase();
+  const canWrite = ["owner", "admin", "ops", "sales"].includes(roleNorm) && hasPerm(role, "orders");
 
   useEffect(() => {
     supabase
@@ -925,19 +937,42 @@ function OrdersView({ orgId, setHelp, role }) {
 
   const sendWhatsApp = (order) => {
     const phone = String(order?.phone || "").replace(/[^\d]/g, "");
-    const msg = `Hola ${order?.customer_name || ""} 👋\nTu pedido #${String(order?.id || "").slice(0, 6).toUpperCase()} está en proceso.\n\nTracking: ${
-      order?.tracking_number || "pendiente"
-    }`;
+    const msg = `Hola ${order?.customer_name || ""} 👋\nTu pedido #${String(order?.id || "")
+      .slice(0, 6)
+      .toUpperCase()} está en proceso.\n\nTracking: ${order?.tracking_number || "pendiente"}`;
+
     if (!phone) return alert("Este pedido no tiene teléfono.");
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
-  const updateTracking = async (id) => {
+  async function getRequesterUserId() {
+    const { data } = await supabase.auth.getUser();
+    return data?.user?.id || null;
+  }
+
+  const updateTracking = async (order) => {
     if (!canWrite) return;
-    const guide = prompt("Número de guía / tracking:");
+
+    const guide = prompt("Número de guía / tracking:", order?.tracking_number || "");
     if (!guide) return;
 
-    await supabase.from("orders").update({ tracking_number: guide, status: "shipped" }).eq("id", id);
+    const requester_user_id = await getRequesterUserId();
+    if (!requester_user_id) return alert("Sesión inválida. Vuelve a entrar.");
+
+    const res = await fetch("/api/orders/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        org_id: orgId,
+        requester_user_id,
+        order_id: order.id,
+        patch: { tracking_number: guide, status: "shipped" }
+      })
+    });
+
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) return alert(j?.error || "Error al actualizar.");
+
     setRefresh((p) => p + 1);
     alert("Guardado");
   };
@@ -949,7 +984,7 @@ function OrdersView({ orgId, setHelp, role }) {
           <h3 className="font-extrabold text-slate-800">Pedidos</h3>
           <p className="text-xs text-slate-500 font-semibold">Pagados / Enviados por organización.</p>
         </div>
-        <button onClick={() => setHelp("Aquí ves pedidos y tracking. Ops/Sales pueden actualizar guías.")}>
+        <button onClick={() => setHelp("Aquí ves pedidos y tracking. Ops/Sales pueden actualizar guías (vía endpoint server).")}>
           <HelpCircle className="text-slate-300 hover:text-unico-600" />
         </button>
       </div>
@@ -972,9 +1007,7 @@ function OrdersView({ orgId, setHelp, role }) {
                 </p>
                 <p className="text-sm text-slate-500 font-semibold truncate">{order.customer_email || "—"}</p>
                 <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
-                  <span className="px-2 py-1 rounded-lg bg-slate-50 text-slate-700">
-                    Total: {moneyMXN(order.total)}
-                  </span>
+                  <span className="px-2 py-1 rounded-lg bg-slate-50 text-slate-700">Total: {moneyMXN(order.total)}</span>
                   <span className="px-2 py-1 rounded-lg bg-slate-50 text-slate-700">
                     Envío: {moneyMXN(order.shipping_cost)}
                   </span>
@@ -994,7 +1027,7 @@ function OrdersView({ orgId, setHelp, role }) {
 
                 {canWrite && order.status !== "shipped" ? (
                   <button
-                    onClick={() => updateTracking(order.id)}
+                    onClick={() => updateTracking(order)}
                     className="flex-1 md:flex-none bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-2xl font-extrabold text-xs"
                   >
                     Cargar Guía
@@ -1013,7 +1046,9 @@ function OrdersView({ orgId, setHelp, role }) {
 function MarketingView({ orgId, setHelp, role }) {
   const [config, setConfig] = useState({});
   const [saving, setSaving] = useState(false);
-  const canWrite = hasPerm(role, "marketing") && (role === "owner" || role === "admin" || role === "marketing");
+
+  const roleNorm = String(role || "").toLowerCase();
+  const canWrite = ["owner", "admin", "marketing"].includes(roleNorm) && hasPerm(role, "marketing");
 
   useEffect(() => {
     supabase
@@ -1029,8 +1064,9 @@ function MarketingView({ orgId, setHelp, role }) {
   const handleSave = async () => {
     if (!canWrite) return;
     setSaving(true);
-    await supabase.from("site_settings").upsert({ ...config, org_id: orgId });
+    const { error } = await supabase.from("site_settings").upsert({ ...config, org_id: orgId });
     setSaving(false);
+    if (error) return alert(error.message);
     alert("Oferta publicada.");
   };
 
@@ -1091,7 +1127,9 @@ function MarketingView({ orgId, setHelp, role }) {
 function SettingsView({ orgId, setHelp, role }) {
   const [config, setConfig] = useState({});
   const [saving, setSaving] = useState(false);
-  const canWrite = hasPerm(role, "settings") && (role === "owner" || role === "admin" || role === "marketing");
+
+  const roleNorm = String(role || "").toLowerCase();
+  const canWrite = ["owner", "admin", "marketing"].includes(roleNorm) && hasPerm(role, "settings");
 
   useEffect(() => {
     supabase
@@ -1107,8 +1145,9 @@ function SettingsView({ orgId, setHelp, role }) {
   const handleSave = async () => {
     if (!canWrite) return;
     setSaving(true);
-    await supabase.from("site_settings").upsert({ ...config, org_id: orgId });
+    const { error } = await supabase.from("site_settings").upsert({ ...config, org_id: orgId });
     setSaving(false);
+    if (error) return alert(error.message);
     alert("Guardado");
   };
 
@@ -1162,7 +1201,7 @@ function UsersView({ orgId, setHelp, role }) {
   const [inviteRole, setInviteRole] = useState("sales");
   const [refresh, setRefresh] = useState(0);
 
-  const canManage = role === "owner" || role === "admin";
+  const canManage = canManageUsers(role);
 
   useEffect(() => {
     supabase
@@ -1173,16 +1212,38 @@ function UsersView({ orgId, setHelp, role }) {
       .then(({ data }) => setMembers(data || []));
   }, [orgId, refresh]);
 
+  async function getRequesterUserId() {
+    const { data } = await supabase.auth.getUser();
+    return data?.user?.id || null;
+  }
+
   const invite = async () => {
     if (!canManage) return;
     if (!inviteEmail) return alert("Escribe un email.");
     setBusy(true);
 
     try {
-      // Nota: Para invitar reales se requiere una Edge Function.
-      alert(
-        "Invitación pendiente: necesitas una función server-side con SERVICE_ROLE para crear usuario e insertar membership.\n\n(Simulación exitosa en UI)"
-      );
+      const requester_user_id = await getRequesterUserId();
+      if (!requester_user_id) return alert("Sesión inválida. Vuelve a entrar.");
+
+      const res = await fetch("/api/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          org_id: orgId,
+          email: inviteEmail,
+          role: inviteRole,
+          requester_user_id
+        })
+      });
+
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return alert(j?.error || "Error al invitar.");
+
+      setInviteEmail("");
+      setInviteRole("sales");
+      setRefresh((p) => p + 1);
+      alert("Invitación enviada / usuario creado.");
     } finally {
       setBusy(false);
     }
@@ -1213,7 +1274,7 @@ function UsersView({ orgId, setHelp, role }) {
             <h3 className="text-xl font-extrabold text-slate-800">Usuarios y Permisos</h3>
             <p className="text-xs text-slate-500 font-semibold">Roles por organización (multitenant real).</p>
           </div>
-          <button onClick={() => setHelp("Owner/Admin pueden administrar roles. Para invitar usuarios hace falta un endpoint con Service Role.")}>
+          <button onClick={() => setHelp("Owner/Admin pueden administrar roles. Invite se ejecuta server-side con Service Role.")}>
             <HelpCircle className="text-slate-300 hover:text-unico-600" />
           </button>
         </div>
@@ -1365,8 +1426,7 @@ function EmptyStateMultiTenant() {
         </div>
         <h2 className="text-lg font-extrabold text-slate-900">Sin organizaciones asignadas</h2>
         <p className="text-sm text-slate-500 font-semibold mt-2">
-          Tu usuario no tiene registros en <span className="font-mono">org_memberships</span>. 
-          Necesitas que owner/admin te agregue a una organización.
+          Tu usuario no tiene registros en <span className="font-mono">org_memberships</span>. Necesitas que owner/admin te agregue a una organización.
         </p>
       </div>
     </div>
