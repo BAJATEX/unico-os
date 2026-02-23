@@ -1,30 +1,45 @@
+// src/lib/authz.js
+"use strict";
+
+/**
+ * Matriz de Control de Acceso Basado en Roles (RBAC) para UnicOs.
+ * Define exactamente qué vistas y acciones puede ejecutar cada rol.
+ */
 export const ROLE_PERMS = {
-  owner: ["dashboard", "orders", "products", "marketing", "settings", "users"],
-  admin: ["dashboard", "orders", "products", "marketing", "settings", "users"],
-  ops: ["dashboard", "orders", "products"],
-  sales: ["dashboard", "orders"],
-  marketing: ["dashboard", "marketing", "settings"],
+  owner: ["dashboard", "orders", "products", "marketing", "settings", "users", "crm"],
+  admin: ["dashboard", "orders", "products", "marketing", "settings", "users", "crm"],
+  ops: ["orders", "products"],
+  sales: ["orders", "crm"],
+  marketing: ["marketing", "products", "dashboard"],
   viewer: ["dashboard"]
 };
 
-export const VALID_ROLES = ["owner", "admin", "ops", "sales", "marketing", "viewer"];
+/**
+ * Verifica si un rol tiene acceso a un módulo específico.
+ * @param {string} role - El rol del usuario (ej. 'admin').
+ * @param {string} module - El módulo a verificar (ej. 'orders').
+ * @returns {boolean}
+ */
+export const hasPerm = (role, module) => {
+  if (!role) return false;
+  const normalizedRole = String(role).toLowerCase().trim();
+  return ROLE_PERMS[normalizedRole]?.includes(module) || false;
+};
 
-export function hasPerm(role, tab) {
-  const r = (role || "viewer").toLowerCase();
-  return (ROLE_PERMS[r] || ROLE_PERMS.viewer).includes(tab);
-}
+/**
+ * Regla de negocio estricta: Solo dueños y administradores pueden gestionar accesos.
+ */
+export const canManageUsers = (role) => {
+  if (!role) return false;
+  const normalizedRole = String(role).toLowerCase().trim();
+  return ["owner", "admin"].includes(normalizedRole);
+};
 
-export function canManageUsers(role) {
-  const r = (role || "viewer").toLowerCase();
-  return r === "owner" || r === "admin";
-}
-
-export function canWriteOrders(role) {
-  const r = (role || "viewer").toLowerCase();
-  return ["owner", "admin", "ops", "sales"].includes(r);
-}
-
-export function normalizeRole(role) {
-  const r = String(role || "viewer").toLowerCase().trim();
-  return VALID_ROLES.includes(r) ? r : "viewer";
-}
+/**
+ * Regla de negocio estricta: Roles autorizados para mutar finanzas/reembolsos.
+ */
+export const canRefund = (role) => {
+  if (!role) return false;
+  const normalizedRole = String(role).toLowerCase().trim();
+  return ["owner", "admin"].includes(normalizedRole);
+};
