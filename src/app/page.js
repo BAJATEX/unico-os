@@ -1,13 +1,13 @@
 // src/app/page.js
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { hasPerm, canManageUsers } from "@/lib/authz";
 import {
   LayoutDashboard, Package, Settings, ShoppingCart, LogOut, ChevronDown, 
-  Plus, Search, X, HelpCircle, Info, Megaphone, Bell, Menu, Shield, 
-  CheckCircle, Upload, DollarSign, Users, Truck, CreditCard, AlertTriangle
+  Info, Megaphone, Bell, Menu, Shield, 
+  CheckCircle, DollarSign, Users, Truck, AlertTriangle
 } from "lucide-react";
 
 const moneyMXN = (v) => Number(v || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
@@ -123,15 +123,17 @@ function AdminDashboard({ session }) {
   const [notifyAuth, setNotifyAuth] = useState(false);
 
   const selectedMembership = useMemo(() => memberships.find((m) => String(m.org_id) === String(selectedOrgId)), [memberships, selectedOrgId]);
-  const selectedOrg = useMemo(() => orgs.find((o) => String(o.id) === String(selectedOrgId)), [orgs, selectedOrgId]);
   const role = selectedMembership?.role || "viewer";
 
   useEffect(() => {
     async function init() {
       try {
-        const { data: mems } = await supabase.from("org_memberships").select("org_id, role").eq("user_id", session.user.id).is("deleted_at", null);
-        const orgIds = (mems || []).map(m => m.org_id);
-        setMemberships(mems || []);
+        const { data: mems } = await supabase.from("admin_users").select("organization_id, role").eq("email", session.user.email).is("is_active", true);
+        const orgIds = (mems || []).map(m => m.organization_id);
+        
+        // Mapeo a la estructura antigua del componente para que no rompa
+        const mappedMems = (mems || []).map(m => ({ org_id: m.organization_id, role: m.role }));
+        setMemberships(mappedMems);
 
         if (orgIds.length) {
           const { data: orgData } = await supabase.from("organizations").select("*").in("id", orgIds).order("name");
@@ -166,7 +168,6 @@ function AdminDashboard({ session }) {
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
       {mobileMenuOpen && <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-30 md:hidden" onClick={() => setMobileMenuOpen(false)} />}
 
-      {/* SIDEBAR LATERAL */}
       <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 md:translate-x-0 md:static ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="p-6 flex items-center gap-3 bg-slate-950/50 border-b border-slate-800">
           <div className="h-10 w-10 bg-unico-600 rounded-xl flex items-center justify-center text-white font-black text-xl shadow-lg shadow-unico-600/20">U</div>
@@ -212,7 +213,6 @@ function AdminDashboard({ session }) {
         </div>
       </aside>
 
-      {/* ÁREA PRINCIPAL */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         <header className="glass-header z-20 px-6 py-4 flex justify-between items-center sticky top-0">
           <div className="flex items-center gap-4">
@@ -228,18 +228,17 @@ function AdminDashboard({ session }) {
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 bg-slate-50/50 pb-32">
           <div className="max-w-7xl mx-auto animate-slide-up">
-            {activeTab === "dashboard" && <DashboardView orgId={selectedOrgId} setHelp={setHelpMsg} />}
+            {activeTab === "dashboard" && <DashboardView orgId={selectedOrgId} />}
             {activeTab === "orders" && <OrdersView orgId={selectedOrgId} setHelp={setHelpMsg} role={role} />}
-            {activeTab === "products" && <ProductsView orgId={selectedOrgId} setHelp={setHelpMsg} role={role} />}
-            {activeTab === "crm" && <CRMView orgId={selectedOrgId} setHelp={setHelpMsg} />}
-            {activeTab === "marketing" && <MarketingView orgId={selectedOrgId} setHelp={setHelpMsg} role={role} />}
-            {activeTab === "settings" && <SettingsView orgId={selectedOrgId} setHelp={setHelpMsg} role={role} />}
-            {activeTab === "users" && <UsersView orgId={selectedOrgId} setHelp={setHelpMsg} role={role} />}
+            {activeTab === "products" && <ProductsView />}
+            {activeTab === "crm" && <CRMView orgId={selectedOrgId} />}
+            {activeTab === "marketing" && <MarketingView orgId={selectedOrgId} />}
+            {activeTab === "settings" && <SettingsView />}
+            {activeTab === "users" && <UsersView orgId={selectedOrgId} role={role} />}
           </div>
         </div>
       </main>
 
-      {/* TOAST DE AYUDA */}
       {helpMsg && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white p-5 rounded-2xl shadow-2xl max-w-sm flex gap-4 animate-slide-up border border-slate-700">
           <Info className="text-unico-600 shrink-0 mt-0.5" size={24} />
@@ -255,7 +254,7 @@ function AdminDashboard({ session }) {
 }
 
 /* =========================================================
-   VISTAS DE MÓDULOS (Dashboard, Orders, Products, CRM...)
+   VISTAS DE MÓDULOS 
    ========================================================= */
 
 function DashboardView({ orgId }) {
@@ -267,7 +266,6 @@ function DashboardView({ orgId }) {
         if (!orders) return;
         let gross = 0, shipping = 0;
         orders.forEach(o => { gross += Number(o.amount_total_mxn || 0); shipping += Number(o.amount_shipping_mxn || 0); });
-        // Simulación de fee de Stripe (aprox 3.6% + $3) para reporte preciso
         const stripeFees = orders.reduce((acc, o) => acc + ((Number(o.amount_total_mxn || 0) * 0.036) + 3), 0);
         setData({ gross, net: gross - shipping - stripeFees, orders: orders.length, avg: orders.length ? gross / orders.length : 0 });
       });
@@ -285,22 +283,13 @@ function DashboardView({ orgId }) {
             {moneyMXN(data.net)}
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-6 border-t border-slate-800/50">
-            <StatBlock label="Ingreso Bruto" value={moneyMXN(data.gross)} />
-            <StatBlock label="Pedidos Pagados" value={data.orders} />
-            <StatBlock label="Ticket Promedio" value={moneyMXN(data.avg)} />
-            <StatBlock label="Tasa Conversión" value="—" />
+            <div><p className="text-slate-500 text-[10px] font-bold uppercase mb-1">Ingreso Bruto</p><p className="text-xl font-bold text-white">{moneyMXN(data.gross)}</p></div>
+            <div><p className="text-slate-500 text-[10px] font-bold uppercase mb-1">Pedidos Pagados</p><p className="text-xl font-bold text-white">{data.orders}</p></div>
+            <div><p className="text-slate-500 text-[10px] font-bold uppercase mb-1">Ticket Promedio</p><p className="text-xl font-bold text-white">{moneyMXN(data.avg)}</p></div>
+            <div><p className="text-slate-500 text-[10px] font-bold uppercase mb-1">Conversión</p><p className="text-xl font-bold text-white">—</p></div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function StatBlock({ label, value }) {
-  return (
-    <div>
-      <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">{label}</p>
-      <p className="text-lg md:text-xl font-bold text-white">{value}</p>
     </div>
   );
 }
@@ -318,45 +307,26 @@ function OrdersView({ orgId, setHelp, role }) {
     <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden tech-shadow">
       <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
         <h3 className="font-black text-lg text-slate-800">Últimos Pedidos</h3>
-        <button onClick={() => setHelp("Los pedidos 'paid' requieren que generes la guía de Envía.com y se la envíes al cliente.")} className="text-slate-400 hover:text-unico-600"><Info size={20}/></button>
+        <button onClick={() => setHelp("Los pedidos 'paid' requieren que generes la guía de Envía.com.")} className="text-slate-400 hover:text-unico-600"><Info size={20}/></button>
       </div>
       <div className="overflow-x-auto custom-scrollbar">
         <table className="w-full text-left text-sm whitespace-nowrap">
           <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 text-[11px] uppercase tracking-widest">
             <tr>
-              <th className="px-6 py-4">ID / Fecha</th>
-              <th className="px-6 py-4">Cliente</th>
-              <th className="px-6 py-4">Resumen Items</th>
-              <th className="px-6 py-4">Total</th>
-              <th className="px-6 py-4">Estado</th>
-              <th className="px-6 py-4 text-right">Acciones</th>
+              <th className="px-6 py-4">ID / Fecha</th><th className="px-6 py-4">Cliente</th><th className="px-6 py-4">Resumen Items</th>
+              <th className="px-6 py-4">Total</th><th className="px-6 py-4">Estado</th><th className="px-6 py-4 text-right">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {orders.map(o => (
               <tr key={o.id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-6 py-4">
-                  <span className="font-mono font-bold text-unico-600">#{o.id.split("-")[0].toUpperCase()}</span>
-                  <div className="text-xs text-slate-400 font-medium mt-1">{new Date(o.created_at).toLocaleDateString()}</div>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="font-bold text-slate-800">{o.customer_name || "Sin Nombre"}</div>
-                  <div className="text-xs text-slate-500">{o.email || "Sin correo"}</div>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="text-xs text-slate-600 max-w-[200px] truncate" title={o.items_summary}>{o.items_summary || "Ver detalles"}</div>
-                  <div className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Vía: {o.shipping_mode || "N/A"}</div>
-                </td>
+                <td className="px-6 py-4"><span className="font-mono font-bold text-unico-600">#{o.id.split("-")[0].toUpperCase()}</span><div className="text-xs text-slate-400 font-medium mt-1">{new Date(o.created_at).toLocaleDateString()}</div></td>
+                <td className="px-6 py-4"><div className="font-bold text-slate-800">{o.customer_name || "Sin Nombre"}</div><div className="text-xs text-slate-500">{o.email || "Sin correo"}</div></td>
+                <td className="px-6 py-4"><div className="text-xs text-slate-600 max-w-[200px] truncate" title={o.items_summary}>{o.items_summary || "Ver detalles"}</div><div className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Vía: {o.shipping_mode || "N/A"}</div></td>
                 <td className="px-6 py-4 font-black text-slate-800">{moneyMXN(o.amount_total_mxn)}</td>
-                <td className="px-6 py-4">
-                  <StatusPill status={o.status} />
-                </td>
+                <td className="px-6 py-4"><StatusPill status={o.status} /></td>
                 <td className="px-6 py-4 text-right">
-                   {canWrite && o.status === 'paid' && (
-                     <button className="text-xs font-bold bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-unico-600 transition-colors shadow-md">
-                       Generar Guía
-                     </button>
-                   )}
+                   {canWrite && o.status === 'paid' && (<button className="text-xs font-bold bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-unico-600 transition-colors shadow-md">Generar Guía</button>)}
                 </td>
               </tr>
             ))}
@@ -376,46 +346,7 @@ function StatusPill({ status }) {
   return <span className="bg-slate-100 text-slate-700 font-bold px-3 py-1 rounded-full text-xs w-max">{status}</span>;
 }
 
-function ProductsView() { return <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center font-bold text-slate-400">Módulo de Inventario en desarrollo. (Fase 2)</div>; }
-function CRMView() { return <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center font-bold text-slate-400">Base de Clientes en desarrollo. (Fase 2)</div>; }
-function MarketingView() { return <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center font-bold text-slate-400">Marketing y Promociones en desarrollo. (Fase 2)</div>; }
-function SettingsView() { return <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center font-bold text-slate-400">Configuración Web en desarrollo. (Fase 2)</div>; }
-function UsersView() { return <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center font-bold text-slate-400">Gestión de Accesos en desarrollo. (Fase 2)</div>; }
-
-function LoadingScreen() {
-  return (
-    <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
-      <div className="h-16 w-16 bg-unico-600 rounded-2xl animate-pulse flex items-center justify-center shadow-[0_0_40px_rgba(225,6,0,0.4)] mb-6">
-        <span className="text-white font-black text-2xl">U</span>
-      </div>
-      <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Cargando UnicOs</p>
-    </div>
-  );
-}
-
-function EmptyStateMultiTenant() {
-  return (
-    <div className="h-screen w-full flex items-center justify-center bg-slate-50 p-6">
-      <div className="max-w-md w-full bg-white border border-slate-200 rounded-[2rem] shadow-2xl p-8 text-center tech-shadow animate-slide-up">
-        <div className="mx-auto h-16 w-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-6">
-          <Shield size={32} />
-        </div>
-        <h2 className="text-xl font-black text-slate-900 mb-2">Acceso Restringido</h2>
-        <p className="text-sm text-slate-500 font-medium leading-relaxed mb-6">
-          Tu cuenta ha sido creada pero no tienes ninguna organización asignada en el sistema. Solicita a un administrador que te invite a Score Store.
-        </p>
-        <button onClick={() => supabase.auth.signOut()} className="text-sm font-bold text-slate-900 hover:text-unico-600 underline">Volver al inicio</button>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   MÓDULOS UNICOS COMPLETADOS (Añadir al final de page.js)
-   ========================================================= */
-
-/** MÓDULO: USUARIOS Y PERMISOS (Conectado a admin_users real) */
-function UsersView({ orgId, setHelp, role }) {
+function UsersView({ orgId, role }) {
   const [members, setMembers] = useState([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("sales");
@@ -479,7 +410,6 @@ function UsersView({ orgId, setHelp, role }) {
   );
 }
 
-/** MÓDULO: CRM CLIENTES (Agregando telemetría de orders) */
 function CRMView({ orgId }) {
   const [customers, setCustomers] = useState([]);
   
@@ -487,13 +417,11 @@ function CRMView({ orgId }) {
     supabase.from("orders").select("email, customer_name, phone, amount_total_mxn, created_at").eq("organization_id", orgId).eq("status", "paid")
       .then(({ data }) => {
         if (!data) return;
-        // Agrupar por correo para formar perfiles CRM
         const map = {};
         data.forEach(o => {
           if(!o.email) return;
           if(!map[o.email]) map[o.email] = { email: o.email, name: o.customer_name, phone: o.phone, ltv: 0, orders: 0, last: o.created_at };
-          map[o.email].ltv += Number(o.amount_total_mxn || 0);
-          map[o.email].orders += 1;
+          map[o.email].ltv += Number(o.amount_total_mxn || 0); map[o.email].orders += 1;
           if (new Date(o.created_at) > new Date(map[o.email].last)) map[o.email].last = o.created_at;
         });
         setCustomers(Object.values(map).sort((a, b) => b.ltv - a.ltv));
@@ -523,15 +451,10 @@ function CRMView({ orgId }) {
   );
 }
 
-/** MÓDULOS MARKETING Y SETTINGS (Conectados a site_settings) */
-function MarketingView({ orgId, role }) {
+function MarketingView({ orgId }) {
   const [cfg, setCfg] = useState({});
   useEffect(() => { supabase.from("site_settings").select("*").eq("organization_id", orgId).single().then(({data}) => {if(data) setCfg(data)}); }, [orgId]);
-  
-  const save = async () => {
-    await supabase.from("site_settings").update({ promo_active: cfg.promo_active, promo_text: cfg.promo_text }).eq("organization_id", orgId);
-    alert("Marketing Guardado");
-  };
+  const save = async () => { await supabase.from("site_settings").update({ promo_active: cfg.promo_active, promo_text: cfg.promo_text }).eq("organization_id", orgId); alert("Marketing Guardado"); };
 
   return (
     <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm tech-shadow max-w-xl animate-slide-up">
@@ -546,13 +469,32 @@ function MarketingView({ orgId, role }) {
   );
 }
 
-function SettingsView({ orgId }) {
-  // Misma estructura que MarketingView pero afectando hero_title y pixel_id.
+function SettingsView() {
   return <div className="p-8 bg-white rounded-[2rem] border border-slate-200 tech-shadow max-w-xl animate-slide-up"><h3 className="font-black text-xl text-slate-800">Ajustes Web Generales</h3><p className="text-slate-500 mt-2 font-medium">Módulo en conexión. Requiere actualización del PWA Frontend.</p></div>;
 }
 
 function ProductsView() {
-  // El front end de Score Store usa "catalog.json" por ahora. 
-  // Cuando migres el store al backend, esta vista inyectará en la tabla products.
   return <div className="p-12 bg-white rounded-[2rem] border border-dashed border-slate-300 text-center font-bold text-slate-400">Para habilitar el Inventario Dinámico, primero corre el script SQL en Supabase.</div>;
+}
+
+function LoadingScreen() {
+  return (
+    <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
+      <div className="h-16 w-16 bg-unico-600 rounded-2xl animate-pulse flex items-center justify-center shadow-[0_0_40px_rgba(225,6,0,0.4)] mb-6"><span className="text-white font-black text-2xl">U</span></div>
+      <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Cargando UnicOs</p>
+    </div>
+  );
+}
+
+function EmptyStateMultiTenant() {
+  return (
+    <div className="h-screen w-full flex items-center justify-center bg-slate-50 p-6">
+      <div className="max-w-md w-full bg-white border border-slate-200 rounded-[2rem] shadow-2xl p-8 text-center tech-shadow animate-slide-up">
+        <div className="mx-auto h-16 w-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-6"><Shield size={32} /></div>
+        <h2 className="text-xl font-black text-slate-900 mb-2">Acceso Restringido</h2>
+        <p className="text-sm text-slate-500 font-medium leading-relaxed mb-6">Tu cuenta ha sido creada pero no tienes ninguna organización asignada. Solicita a un administrador que te invite a Score Store.</p>
+        <button onClick={() => supabase.auth.signOut()} className="text-sm font-bold text-slate-900 hover:text-unico-600 underline">Volver al inicio</button>
+      </div>
+    </div>
+  );
 }
