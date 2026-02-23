@@ -1,13 +1,23 @@
-# netlify.toml para ÚNICO OS (Next.js 14 App Router)
-
 [build]
-  command = "npm run build"
+  publish = "."
+  functions = "netlify/functions"
 
-[build.environment]
-  NODE_VERSION = "20"
-  NEXT_PRIVATE_STANDALONE = "true"
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  included_files = ["data/*.json", "db/*.sql"]
 
-# BLINDAJE DE SEGURIDAD EXIGIDO POR LIGHTHOUSE (CSP Y HSTS)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
@@ -16,5 +26,23 @@
     X-XSS-Protection = "1; mode=block"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    # FIX CSP: Permite cargar imágenes desde Score Store (.netlify.app) y blobs locales
-    Content-Security-Policy = "default-src 'self'; img-src 'self' data: blob: https://*.supabase.co https://*.netlify.app; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co;"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+    # CIBERSEGURIDAD: CSP Sincronizado. Permite Stripe SDK y Supabase.
+    Content-Security-Policy = "default-src 'self' https://js.stripe.com; img-src 'self' data: https:; script-src 'self' https://js.stripe.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.stripe.com https://*.supabase.co;"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/data/*.json"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, proxy-revalidate"
+    Pragma = "no-cache"
+    Expires = "0"
+
+[[headers]]
+  for = "/*.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json; charset=utf-8"
