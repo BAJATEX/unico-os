@@ -1,6 +1,7 @@
+-- db/unicos_extension.sql
 -- =========================================================
 -- UNICOS ADMIN EXTENSION v2026-02-21
--- Inyecta los módulos dinámicos al schema de Score Store
+-- Añade solo los módulos extra requeridos sin tocar Orders
 -- =========================================================
 
 -- 1. Tabla de Configuración Web (Marketing / SEO)
@@ -14,7 +15,7 @@ CREATE TABLE IF NOT EXISTS public.site_settings (
 );
 ALTER TABLE public.site_settings ENABLE ROW LEVEL SECURITY;
 
--- 2. Tabla de Inventario / Productos
+-- 2. Tabla de Inventario / Productos (Solo si se habilita Dinámico)
 CREATE TABLE IF NOT EXISTS public.products (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL REFERENCES public.organizations(id),
@@ -32,8 +33,10 @@ ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_products_org ON public.products(organization_id);
 
 -- 3. Políticas RLS (Seguridad Zero-Trust)
--- Solo el servidor backend (Service Role) o usuarios autenticados pueden leer.
+DROP POLICY IF EXISTS "Lectura global" ON public.site_settings;
 CREATE POLICY "Lectura global" ON public.site_settings FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Lectura global productos" ON public.products;
 CREATE POLICY "Lectura global productos" ON public.products FOR SELECT USING (deleted_at IS NULL);
 
 -- Inserta la configuración inicial conectada a tu organización principal
