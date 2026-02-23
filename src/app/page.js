@@ -12,9 +12,6 @@ import {
 
 const moneyMXN = (v) => Number(v || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 
-/* =========================================================
-   ENTRY POINT
-   ========================================================= */
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
@@ -36,9 +33,6 @@ export default function AdminPage() {
   return <AdminDashboard session={session} />;
 }
 
-/* =========================================================
-   LOGIN SCREEN (Enterprise Meta/Shopify Style)
-   ========================================================= */
 function LoginScreen() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -109,9 +103,6 @@ function LoginScreen() {
   );
 }
 
-/* =========================================================
-   DASHBOARD LAYOUT (El Core de UnicOs)
-   ========================================================= */
 function AdminDashboard({ session }) {
   const [orgs, setOrgs] = useState([]);
   const [memberships, setMemberships] = useState([]);
@@ -130,8 +121,6 @@ function AdminDashboard({ session }) {
       try {
         const { data: mems } = await supabase.from("admin_users").select("organization_id, role").eq("email", session.user.email).is("is_active", true);
         const orgIds = (mems || []).map(m => m.organization_id);
-        
-        // Mapeo a la estructura antigua del componente para que no rompa
         const mappedMems = (mems || []).map(m => ({ org_id: m.organization_id, role: m.role }));
         setMemberships(mappedMems);
 
@@ -252,10 +241,6 @@ function AdminDashboard({ session }) {
     </div>
   );
 }
-
-/* =========================================================
-   VISTAS DE MÓDULOS 
-   ========================================================= */
 
 function DashboardView({ orgId }) {
   const [data, setData] = useState({ gross: 0, net: 0, orders: 0, avg: 0 });
