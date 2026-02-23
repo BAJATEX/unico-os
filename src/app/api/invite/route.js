@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
-import { canManageUsers, normalizeRole } from "@/lib/authz";
+import { canManageUsers } from "@/lib/authz";
 
-function json(status, body) {
-  return NextResponse.json(body, { status });
-}
+function json(status, body) { return NextResponse.json(body, { status }); }
 
 function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
+  const m = (req.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
   return m ? m[1] : "";
 }
 
@@ -16,57 +13,42 @@ export async function POST(req) {
   try {
     const sb = serverSupabase();
     const token = getBearerToken(req);
-
-    // 1) user real
     const { user, error: authErr } = await requireUserFromToken(sb, token);
     if (authErr) return json(401, { error: authErr });
 
-    // 2) body
-    const body = await req.json();
-    const { org_id, email, role } = body || {};
+    const { organization_id, email, role } = await req.json();
+    if (!organization_id || !email || !role) return json(400, { error: "Datos incompletos" });
 
-    if (!org_id || !email || !role) {
-      return json(400, { error: "Missing org_id/email/role" });
-    }
+    const cleanEmail = String(email).trim().toLowerCase();
 
-    const cleanRole = normalizeRole(role);
-    const cleanEmail = String(email || "").trim().toLowerCase();
-    if (!cleanEmail.includes("@")) return json(400, { error: "Invalid email" });
-
-    // 3) requester membership role
-    const { data: requesterMem, error: memErr } = await sb
-      .from("org_memberships")
+    // 1. Validar si el usuario actual es Owner/Admin (Usando admin_users de Score Store)
+    const { data: reqUser, error: memErr } = await sb
+      .from("admin_users")
       .select("role")
-      .eq("org_id", org_id)
-      .eq("user_id", user.id)
+      .eq("organization_id", organization_id)
+      .eq("email", user.email)
+      .is("is_active", true)
       .maybeSingle();
 
     if (memErr) return json(500, { error: memErr.message });
+    const reqRole = (reqUser?.role || "viewer").toLowerCase();
+    if (!canManageUsers(reqRole)) return json(403, { error: "Privilegios insuficientes" });
 
-    const requesterRole = (requesterMem?.role || "viewer").toLowerCase();
-    if (!canManageUsers(requesterRole)) return json(403, { error: "Not allowed" });
+    // 2. Invitar vía Supabase Auth
+    const { error: invErr } = await sb.auth.admin.inviteUserByEmail(cleanEmail);
+    if (invErr && !invErr.message.includes("already registered")) {
+      return json(500, { error: invErr.message });
+    }
 
-    // 4) invite real
-    const redirectTo = process.env.NEXT_PUBLIC_INVITE_REDIRECT || undefined;
-
-    const { data: invited, error: invErr } = await sb.auth.admin.inviteUserByEmail(cleanEmail, {
-      redirectTo
-    });
-
-    if (invErr) return json(500, { error: invErr.message });
-
-    const newUserId = invited?.user?.id;
-    if (!newUserId) return json(500, { error: "Invite created but user id missing" });
-
-    // 5) upsert membership
+    // 3. Upsert en admin_users
     const { error: upErr } = await sb
-      .from("org_memberships")
-      .upsert({ org_id, user_id: newUserId, role: cleanRole }, { onConflict: "org_id,user_id" });
+      .from("admin_users")
+      .upsert(
+        { organization_id, email: cleanEmail, role: role.toLowerCase(), is_active: true },
+        { onConflict: "email" } 
+      );
 
     if (upErr) return json(500, { error: upErr.message });
-
-    return json(200, { ok: true, user_id: newUserId, role: cleanRole });
-  } catch (e) {
-    return json(500, { error: e?.message || "Server error" });
-  }
+    return json(200, { ok: true, email: cleanEmail, role });
+  } catch (e) { return json(500, { error: e?.message || "Server error" }); }
 }
