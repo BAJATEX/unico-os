@@ -66,13 +66,11 @@ function LoginScreen() {
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 p-4 relative overflow-hidden">
-      {/* Efectos de fondo adaptados al Azul Marino Claro */}
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[120px] pointer-events-none" />
       
       <div className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl overflow-hidden relative z-10 animate-slide-up">
         <div className="p-8 text-center border-b border-slate-100 bg-slate-50/50">
-          {/* Logo Oficial Integrado y Redondeado */}
           <img src="/icon-192.png" alt="UnicOs Logo" className="mx-auto h-20 w-20 rounded-full shadow-lg shadow-blue-500/30 mb-4 object-cover border-4 border-white" />
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">UnicOs <span className="text-blue-600">Admin</span></h1>
           <p className="text-xs font-bold text-slate-500 tracking-widest uppercase mt-2">Central Command</p>
@@ -158,7 +156,6 @@ function AdminDashboard({ session }) {
 
       <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 md:translate-x-0 md:static ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="p-6 flex items-center gap-3 bg-slate-950/50 border-b border-slate-800">
-          {/* Logo en el Menú Lateral */}
           <img src="/icon-192.png" alt="UnicOs" className="h-10 w-10 rounded-full shadow-lg shadow-blue-600/20 object-cover border-2 border-slate-800" />
           <div>
             <h1 className="text-lg font-black text-white leading-tight tracking-tight">UnicOs</h1>
@@ -424,7 +421,6 @@ function ProductsView() {
 function LoadingScreen() {
   return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
-      {/* Animación del logo al cargar */}
       <img src="/icon-192.png" alt="UnicOs Logo" className="h-20 w-20 rounded-full animate-pulse shadow-[0_0_40px_rgba(37,99,235,0.4)] mb-6 object-cover border-4 border-slate-800" />
       <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Estableciendo Conexión...</p>
     </div>
