@@ -30,7 +30,7 @@ export default function AdminPage() {
     return () => { if (unsub) unsub.unsubscribe(); };
   }, []);
 
-  if (loading) return <LoadingScreen />;
+  if (loading) return <LoadingScreen text="Cargando Sistema Central..." />;
   if (!session) return <LoginScreen />;
   return <AdminDashboard session={session} />;
 }
@@ -149,7 +149,6 @@ function AdminDashboard({ session }) {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      {/* Sidebar Mobile Overlay */}
       {mobileMenuOpen && <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-30 md:hidden" onClick={() => setMobileMenuOpen(false)} />}
 
       <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-[#0a0f1c] text-slate-300 flex flex-col transition-transform duration-300 md:translate-x-0 md:static ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"} border-r border-slate-800`}>
@@ -222,7 +221,6 @@ function AdminDashboard({ session }) {
           </div>
         </div>
 
-        {/* UNICO IA - AGENTE AUTÓNOMO */}
         <UnicoIAAgent orgId={selectedOrgId} />
       </main>
     </div>
@@ -230,7 +228,7 @@ function AdminDashboard({ session }) {
 }
 
 /* =========================================================
-   MÓDULOS DE NEGOCIO (UX/UI MEJORADO & CERO TECNICISMOS)
+   MÓDULOS DE NEGOCIO
    ========================================================= */
 
 function DashboardView({ orgId }) {
@@ -355,7 +353,6 @@ function OrdersView({ orgId }) {
         </table>
       </div>
 
-      {/* Modal de Detalles de Pedido */}
       {modalData && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-slide-up">
@@ -555,7 +552,7 @@ function UsersView({ orgId }) {
   );
 }
 
-/* =/* =========================================================
+/* =========================================================
    COMPONENTE: UNICO IA (AGENTE AUTÓNOMO CONECTADO A GEMINI)
    ========================================================= */
 function UnicoIAAgent({ orgId }) {
@@ -600,7 +597,8 @@ function UnicoIAAgent({ orgId }) {
       setMessages(prev => [...prev, { role: "ai", text: data.reply }]);
 
     } catch (error) {
-      setMessages(prev => [...prev, { role: "ai", text: "⚠️ Hubo un fallo en mis sistemas de conexión: " + error.message }]);
+      // Fallback local en caso de que la ruta de API aún no esté creada
+      setMessages(prev => [...prev, { role: "ai", text: "⚠️ Hubo un fallo en mis sistemas de conexión. Por favor asegúrate de haber creado la ruta API en /api/ai/route.js con tu llave de Gemini." }]);
     } finally {
       setIsThinking(false);
     }
@@ -654,7 +652,9 @@ function UnicoIAAgent({ orgId }) {
       </div>
     </>
   );
-} =========================================================
+}
+
+/* =========================================================
    SKELETON LOADERS (CARGA ÓPTICA UX)
    ========================================================= */
 function SkeletonLoader({ type }) {
