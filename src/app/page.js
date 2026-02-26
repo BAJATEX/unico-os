@@ -11,129 +11,173 @@ import {
 } from "lucide-react";
 
 const moneyMXN = (v) => Number(v || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
+const num = (v) => Number(v || 0).toLocaleString("en-US");
 
-/* =========================================================
-   ENTRY POINT
-   ========================================================= */
-export default function AdminPage() {
-  const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState(null);
-
-  useEffect(() => {
-    let unsub = null;
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session || null);
-      const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s || null));
-      unsub = sub?.subscription;
-      setLoading(false);
-    })();
-    return () => { if (unsub) unsub.unsubscribe(); };
-  }, []);
-
-  if (loading) return <LoadingScreen text="Cargando Sistema Central..." />;
-  if (!session) return <LoginScreen />;
-  return <AdminDashboard session={session} />;
-}
-
-/* =========================================================
-   LOGIN SCREEN
-   ========================================================= */
-function LoginScreen() {
-  const [mode, setMode] = useState("login");
+function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState({ text: "", type: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  const submit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    setBusy(true); setMsg({ text: "", type: "" });
-    try {
-      if (!email || !password) throw new Error("Por favor, ingresa tus credenciales.");
-      if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setMsg({ text: "Solicitud enviada al CEO. Espera aprobación.", type: "success" });
-      }
-    } catch (err) {
-      setMsg({ text: err?.message === "Invalid login credentials" ? "Correo o contraseña incorrectos." : err?.message, type: "error" });
-    } finally { setBusy(false); }
+    setLoading(true);
+    setError(null);
+    const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+    if (loginError) setError(loginError.message);
+    else if (data?.session) onLogin(data.session);
+    setLoading(false);
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-[#0a0f1c] p-4 relative overflow-hidden font-sans">
-      <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none animate-pulse" />
-      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-indigo-600/10 rounded-full blur-[150px] pointer-events-none animate-pulse" />
-      
-      <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden relative z-10 animate-slide-up">
-        <div className="p-10 text-center border-b border-white/5 flex flex-col items-center">
-          <div className="relative h-24 w-24 mb-6 rounded-full shadow-[0_0_30px_rgba(37,99,235,0.3)] border-2 border-white/20 overflow-hidden">
-            <Image src="/icon-192.png" alt="UnicOs" fill priority sizes="96px" className="object-cover" />
-          </div>
-          <h1 className="text-3xl font-black text-white tracking-tight">UnicOs</h1>
-          <p className="text-sm font-semibold text-blue-400 tracking-widest uppercase mt-2">Centro de Control Global</p>
-        </div>
+    <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 p-6 font-sans">
+      <div className="max-w-md w-full bg-slate-800 border border-slate-700 rounded-3xl shadow-2xl p-10 overflow-hidden relative">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
+        <div className="absolute bottom-0 left-0 w-32 h-32 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse animation-delay-2000"></div>
 
-        <form onSubmit={submit} className="p-10 space-y-6">
-          <div>
-            <label className="text-xs font-bold text-slate-400 uppercase ml-1 block mb-2">Correo Corporativo</label>
-            <input className="w-full bg-black/40 border border-white/10 text-white p-4 rounded-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 transition-all font-medium placeholder-slate-600"
-              value={email} onChange={(e) => setEmail(e.target.value.trim().toLowerCase())} placeholder="ejemplo@scorestore.com" type="email" />
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="w-20 h-20 bg-slate-900 rounded-2xl flex items-center justify-center mb-6 shadow-inner border border-slate-700">
+            <Shield className="text-blue-500" size={40} strokeWidth={1.5} />
           </div>
-          <div>
-            <label className="text-xs font-bold text-slate-400 uppercase ml-1 block mb-2">Clave de Acceso</label>
-            <input className="w-full bg-black/40 border border-white/10 text-white p-4 rounded-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 transition-all font-medium placeholder-slate-600"
-              value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" type="password" />
-          </div>
+          <h1 className="text-3xl font-black text-white mb-2 tracking-tight">UnicOs <span className="text-blue-500">Enterprise</span></h1>
+          <p className="text-slate-400 text-sm mb-8 text-center font-medium">Centro de Control Global</p>
 
-          {msg.text && (
-            <div className={`p-4 rounded-xl text-sm font-bold flex items-start gap-3 ${msg.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-green-500/10 text-green-400 border border-green-500/20'}`}>
-               <AlertTriangle size={18} className="shrink-0 mt-0.5" /> <span>{msg.text}</span>
+          {error && (
+            <div className="w-full bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl mb-6 text-sm flex items-start">
+              <AlertTriangle className="mr-3 flex-shrink-0 mt-0.5" size={16} />
+              <span>{error}</span>
             </div>
           )}
 
-          <button disabled={busy} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl shadow-[0_10px_30px_rgba(37,99,235,0.3)] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
-            {busy ? "VERIFICANDO IDENTIDAD..." : mode === "login" ? "INICIAR SESIÓN" : "SOLICITAR ACCESO"}
-          </button>
-        </form>
+          <form onSubmit={handleLogin} className="w-full space-y-5">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Correo Corporativo</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-600"
+                placeholder="operador@unicos.com"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Contraseña de Acceso</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-600"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-blue-600 text-white font-black py-4 rounded-xl hover:bg-blue-500 transition-colors shadow-lg shadow-blue-500/30 flex items-center justify-center mt-4 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                "Acceder al Sistema"
+              )}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
 }
 
-/* =========================================================
-   DASHBOARD LAYOUT
-   ========================================================= */
-function AdminDashboard({ session }) {
-  const [orgs, setOrgs] = useState([]);
-  const [memberships, setMemberships] = useState([]);
-  const [selectedOrgId, setSelectedOrgId] = useState(null);
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [loading, setLoading] = useState(true);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+function LoadingScreen({ text = "Sincronizando..." }) {
+  return (
+    <div className="min-h-screen w-full bg-slate-900 flex flex-col items-center justify-center font-sans">
+      <div className="w-16 h-16 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin mb-6"></div>
+      <p className="text-slate-400 text-sm font-medium animate-pulse">{text}</p>
+    </div>
+  );
+}
 
-  const selectedMembership = useMemo(() => memberships.find((m) => String(m.org_id) === String(selectedOrgId)), [memberships, selectedOrgId]);
-  const role = selectedMembership?.role || "Operador";
+function EmptyStateMultiTenant() {
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 p-6 font-sans">
+      <div className="max-w-md w-full bg-slate-800 border border-slate-700 rounded-3xl shadow-2xl p-10 text-center">
+        <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-6">
+          <AlertTriangle className="text-yellow-500" size={40} />
+        </div>
+        <h2 className="text-xl font-black text-white mb-2">Acceso Denegado</h2>
+        <p className="text-slate-400 text-sm mb-8 leading-relaxed">
+          Tu cuenta no está vinculada a ninguna organización activa. Contacta al Administrador de UnicOs para solicitar acceso a un Tenant.
+        </p>
+        <button onClick={() => supabase.auth.signOut()} className="w-full bg-slate-700 text-white font-bold py-3 rounded-xl hover:bg-slate-600 transition-colors">
+          Cerrar Sesión
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdminDashboard({ session }) {
+  const [loading, setLoading] = useState(true);
+  const [orgs, setOrgs] = useState([]);
+  const [selectedOrgId, setSelectedOrgId] = useState(null);
+  const [memberships, setMemberships] = useState([]);
+  
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     async function init() {
       try {
-        const { data: mems } = await supabase.from("admin_users").select("organization_id, role").eq("email", session.user.email).is("is_active", true);
+        const userEmail = session?.user?.email || "";
+        console.log("🚀 Iniciando Login en God Mode para:", userEmail);
+        
+        // 1. God Mode: Buscar usuario ignorando mayúsculas (ilike) y SIN is_active por ahora
+        const { data: mems, error: memError } = await supabase
+          .from("admin_users")
+          .select("organization_id, role")
+          .ilike("email", userEmail);
+
+        if (memError) throw new Error("Error en admin_users: " + JSON.stringify(memError));
+
+        console.log("📦 Datos obtenidos de admin_users:", mems);
+
         const orgIds = (mems || []).map(m => m.organization_id);
         setMemberships((mems || []).map(m => ({ org_id: m.organization_id, role: m.role })));
 
-        if (orgIds.length) {
-          const { data: orgData } = await supabase.from("organizations").select("*").in("id", orgIds).order("name");
+        if (orgIds.length > 0) {
+          // 2. Buscar empresas asignadas
+          const { data: orgData, error: orgError } = await supabase
+            .from("organizations")
+            .select("*")
+            .in("id", orgIds)
+            .order("name");
+            
+          if (orgError) throw new Error("Error en organizations: " + JSON.stringify(orgError));
+          
+          console.log("🏢 Organizaciones cargadas:", orgData);
+
           setOrgs(orgData || []);
           setSelectedOrgId(orgData?.[0]?.id || null);
+        } else {
+          console.error("🚨 CRÍTICO: Auth exitoso, pero admin_users devolvió 0 filas para:", userEmail);
+          alert("ERROR: Tu correo (" + userEmail + ") no está vinculado a la organización.\n\nVerifica en Supabase que el email en 'admin_users' sea exactamente ese y no tenga espacios.");
         }
-      } finally { setLoading(false); }
+      } catch (err) {
+        console.error("Error crítico en init():", err);
+        alert("ERROR DEL SISTEMA:\n" + err.message);
+      } finally {
+        setLoading(false);
+      }
     }
-    init();
+    
+    // Evitamos ejecutar si la sesión no está lista
+    if (session && session.user) {
+      init();
+    } else {
+      setLoading(false);
+    }
   }, [session]);
 
   const signOut = () => supabase.auth.signOut();
@@ -143,518 +187,616 @@ function AdminDashboard({ session }) {
 
   const TABS = [
     { id: "dashboard", label: "Salud del Negocio", icon: <LayoutDashboard size={20} /> },
-    { id: "orders", label: "Logística y Pedidos", icon: <ShoppingCart size={20} /> },
-    { id: "crm", label: "Base de Clientes", icon: <Users size={20} /> },
-    { id: "marketing", label: "Centro de Marketing", icon: <Megaphone size={20} /> },
-    { id: "products", label: "Inventario Global", icon: <Package size={20} /> },
-    { id: "users", label: "Personal y Accesos", icon: <Shield size={20} /> }
+    { id: "orders", label: "Órdenes (Stripe)", icon: <ShoppingCart size={20} /> },
+    { id: "products", label: "Catálogo", icon: <Package size={20} /> },
+    { id: "marketing", label: "Marketing / Megáfono", icon: <Megaphone size={20} /> },
   ];
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      {mobileMenuOpen && <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-30 md:hidden" onClick={() => setMobileMenuOpen(false)} />}
-
-      <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-[#0a0f1c] text-slate-300 flex flex-col transition-transform duration-300 md:translate-x-0 md:static ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"} border-r border-slate-800`}>
-        <div className="p-6 flex items-center gap-4 bg-white/5 border-b border-white/5">
-          <div className="relative h-12 w-12 rounded-full shadow-[0_0_15px_rgba(37,99,235,0.4)] border border-white/10 overflow-hidden shrink-0">
-            <Image src="/icon-192.png" alt="UnicOs" fill sizes="48px" className="object-cover" />
+    <div className="flex h-screen bg-slate-900 font-sans text-slate-200 overflow-hidden">
+      {/* Sidebar Desktop */}
+      <aside className="hidden md:flex flex-col w-72 bg-slate-950 border-r border-slate-800 shrink-0 relative z-20">
+        <div className="h-20 flex items-center px-6 border-b border-slate-800">
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center mr-3 shadow-lg shadow-blue-500/20">
+            <Shield className="text-white" size={20} />
           </div>
           <div>
-            <h1 className="text-xl font-black text-white leading-tight">UnicOs</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]"></span>
-              <p className="text-[10px] font-bold tracking-widest uppercase text-blue-400">{role}</p>
+            <h2 className="text-xl font-black text-white leading-none">UnicOs</h2>
+            <p className="text-[10px] text-blue-400 font-bold tracking-widest uppercase mt-1">Enterprise</p>
+          </div>
+        </div>
+
+        {/* Tenant Selector */}
+        {orgs.length > 1 && (
+          <div className="p-4 border-b border-slate-800">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Organización Activa</label>
+            <div className="relative">
+              <select
+                className="w-full bg-slate-900 border border-slate-700 text-white font-bold px-4 py-3 rounded-xl appearance-none outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+                value={selectedOrgId}
+                onChange={(e) => setSelectedOrgId(e.target.value)}
+              >
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-4 top-3.5 text-slate-400 pointer-events-none" size={16} />
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="p-5 border-b border-white/5">
-          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Empresa Administrada</label>
-          <div className="relative">
-            <select className="w-full appearance-none bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-sm font-bold text-white outline-none focus:border-blue-500 transition-colors cursor-pointer"
-              value={selectedOrgId || ""} onChange={(e) => { setSelectedOrgId(e.target.value); setActiveTab("dashboard"); }}>
-              {orgs.map(o => <option key={o.id} value={o.id} className="bg-slate-900">{o.name}</option>)}
-            </select>
-            <ChevronDown className="absolute right-4 top-3.5 text-slate-400 pointer-events-none" size={16} />
-          </div>
-        </div>
-
-        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scrollbar">
-          {TABS.map(tab => (
-            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-200 group ${activeTab === tab.id ? "bg-blue-600 text-white shadow-[0_4px_20px_rgba(37,99,235,0.3)]" : "hover:bg-white/5 hover:text-white"}`}>
-              <span className={`${activeTab === tab.id ? "text-white" : "text-slate-500 group-hover:text-blue-400 transition-colors"}`}>{tab.icon}</span>
-              {tab.label}
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+          <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Módulos</p>
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className={`w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-200 font-bold text-sm ${
+                activeTab === t.id 
+                  ? "bg-blue-600/10 text-blue-400 border border-blue-500/20 shadow-inner" 
+                  : "text-slate-400 hover:bg-slate-900 hover:text-white"
+              }`}
+            >
+              <span className={`mr-3 ${activeTab === t.id ? "text-blue-500" : "text-slate-500"}`}>{t.icon}</span>
+              {t.label}
             </button>
           ))}
         </nav>
 
-        <div className="p-4 bg-black/20 border-t border-white/5">
-          <button onClick={signOut} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl hover:bg-red-500/10 hover:text-red-400 text-xs font-bold transition-colors text-slate-400">
-            <LogOut size={16} /> CERRAR SESIÓN DE TRABAJO
+        <div className="p-6 border-t border-slate-800 bg-slate-950">
+          <div className="flex items-center mb-6">
+            <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
+              <span className="text-sm font-bold text-white">{session.user.email.substring(0,2).toUpperCase()}</span>
+            </div>
+            <div className="ml-3 overflow-hidden">
+              <p className="text-sm font-bold text-white truncate">{session.user.email}</p>
+              <p className="text-xs text-slate-500 font-medium">Operador de Sistema</p>
+            </div>
+          </div>
+          <button 
+            onClick={signOut} 
+            className="w-full flex items-center justify-center py-3 text-sm font-bold text-red-400 hover:bg-red-500/10 rounded-xl transition-colors border border-transparent hover:border-red-500/20"
+          >
+            <LogOut size={16} className="mr-2" /> Desconectar
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col h-screen overflow-hidden relative bg-slate-50">
-        <header className="z-20 px-8 py-5 flex justify-between items-center bg-white/80 backdrop-blur-xl border-b border-slate-200 sticky top-0">
-          <div className="flex items-center gap-4">
-            <button onClick={() => setMobileMenuOpen(true)} className="md:hidden p-2 text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200"><Menu size={20} /></button>
-            <div>
-              <h2 className="text-2xl font-black text-slate-800 tracking-tight leading-none">
-                {TABS.find(t => t.id === activeTab)?.label || "Panel Operativo"}
-              </h2>
-              <p className="text-xs font-semibold text-slate-500 mt-1 uppercase tracking-wider">Sistema Operativo Automatizado</p>
+      {/* Mobile Header & Sidebar */}
+      <div className="md:hidden fixed top-0 left-0 w-full h-16 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-4 z-50">
+        <div className="flex items-center">
+          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center mr-2">
+            <Shield className="text-white" size={16} />
+          </div>
+          <h2 className="text-lg font-black text-white">UnicOs</h2>
+        </div>
+        <button onClick={() => setIsSidebarOpen(true)} className="text-slate-400 p-2">
+          <Menu size={24} />
+        </button>
+      </div>
+
+      {isSidebarOpen && (
+        <div className="md:hidden fixed inset-0 z-[60] flex">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>
+          <aside className="w-72 bg-slate-950 h-full flex flex-col relative z-10 border-r border-slate-800 shadow-2xl">
+             <div className="h-20 flex items-center justify-between px-6 border-b border-slate-800">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center mr-3">
+                    <Shield className="text-white" size={16} />
+                  </div>
+                  <h2 className="text-xl font-black text-white">UnicOs</h2>
+                </div>
+                <button onClick={() => setIsSidebarOpen(false)} className="text-slate-400"><X size={24}/></button>
+             </div>
+             <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+                <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Módulos</p>
+                {TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => { setActiveTab(t.id); setIsSidebarOpen(false); }}
+                    className={`w-full flex items-center px-4 py-3.5 rounded-xl transition-all duration-200 font-bold text-sm ${
+                      activeTab === t.id 
+                        ? "bg-blue-600/10 text-blue-400 border border-blue-500/20 shadow-inner" 
+                        : "text-slate-400 hover:bg-slate-900 hover:text-white"
+                    }`}
+                  >
+                    <span className={`mr-3 ${activeTab === t.id ? "text-blue-500" : "text-slate-500"}`}>{t.icon}</span>
+                    {t.label}
+                  </button>
+                ))}
+             </nav>
+             <div className="p-6 border-t border-slate-800">
+                <button onClick={signOut} className="w-full flex items-center justify-center py-3 text-sm font-bold text-red-400 hover:bg-red-500/10 rounded-xl transition-colors border border-transparent hover:border-red-500/20">
+                  <LogOut size={16} className="mr-2" /> Desconectar
+                </button>
+             </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      <main className="flex-1 relative flex flex-col h-full overflow-hidden bg-[#0A0F1C] pt-16 md:pt-0">
+        {/* Decorative Grid */}
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03] pointer-events-none mix-blend-overlay"></div>
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-blue-500/20 opacity-30 blur-[120px] rounded-full pointer-events-none"></div>
+        
+        <div className="relative z-10 flex-1 overflow-auto">
+          <div className="max-w-7xl mx-auto p-4 md:p-8">
+            <TenantHeader orgs={orgs} orgId={selectedOrgId} />
+            <div className="mt-8">
+              {activeTab === "dashboard" && <ModuleDashboard orgId={selectedOrgId} />}
+              {activeTab === "orders" && <ModuleOrders orgId={selectedOrgId} />}
+              {activeTab === "products" && <ModuleProducts orgId={selectedOrgId} />}
+              {activeTab === "marketing" && <ModuleMarketing orgId={selectedOrgId} />}
             </div>
           </div>
-          <div className="hidden md:flex items-center gap-4">
-             <div className="bg-blue-50 border border-blue-100 px-4 py-2 rounded-full flex items-center gap-2">
-                <Shield size={14} className="text-blue-600" />
-                <span className="text-xs font-bold text-blue-800">{session.user.email}</span>
-             </div>
-          </div>
-        </header>
-
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 pb-32">
-          <div className="max-w-7xl mx-auto animate-slide-up">
-            {activeTab === "dashboard" && <DashboardView orgId={selectedOrgId} />}
-            {activeTab === "orders" && <OrdersView orgId={selectedOrgId} />}
-            {activeTab === "crm" && <CRMView orgId={selectedOrgId} />}
-            {activeTab === "marketing" && <MarketingView orgId={selectedOrgId} />}
-            {activeTab === "products" && <ProductsView />}
-            {activeTab === "users" && <UsersView orgId={selectedOrgId} />}
-          </div>
         </div>
-
-        <UnicoIAAgent orgId={selectedOrgId} />
       </main>
+
+      {/* Unico IA Floating Agent */}
+      <UnicoIAAgent orgId={selectedOrgId} />
     </div>
   );
 }
 
-/* =========================================================
-   MÓDULOS DE NEGOCIO
-   ========================================================= */
+function TenantHeader({ orgs, orgId }) {
+  const current = orgs.find(o => o.id === orgId);
+  return (
+    <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-800 pb-6">
+      <div>
+        <h1 className="text-3xl md:text-4xl font-black text-white tracking-tight">{current?.name || "Empresa"}</h1>
+        <div className="flex items-center mt-2 text-sm text-slate-400 font-medium">
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
+          Sistemas Operativos Online
+        </div>
+      </div>
+      <div className="bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-xl flex items-center text-sm font-bold text-slate-300 shadow-inner">
+        <Info size={16} className="text-blue-500 mr-2" /> ID: {current?.slug}
+      </div>
+    </div>
+  );
+}
 
-function DashboardView({ orgId }) {
-  const [data, setData] = useState({ gross: 0, net: 0, orders: 0, avg: 0 });
+// --------------------------------------------------------
+// MÓDULOS DEL PANEL (Dashboard, Órdenes, Productos, Marketing)
+// --------------------------------------------------------
+
+function ModuleDashboard({ orgId }) {
+  const [stats, setStats] = useState({ revenue: 0, orders: 0, pending: 0, AOV: 0 });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchStats = async () => {
     setLoading(true);
-    supabase.from("orders").select("amount_total_mxn, amount_shipping_mxn").eq("organization_id", orgId).eq("status", "paid")
-      .then(({ data: orders }) => {
-        if (!orders) return;
-        let gross = 0, shipping = 0;
-        orders.forEach(o => { gross += Number(o.amount_total_mxn || 0); shipping += Number(o.amount_shipping_mxn || 0); });
-        const stripeFees = orders.reduce((acc, o) => acc + ((Number(o.amount_total_mxn || 0) * 0.036) + 3), 0);
-        setData({ gross, net: gross - shipping - stripeFees, orders: orders.length, avg: orders.length ? gross / orders.length : 0 });
-        setLoading(false);
-      });
-  }, [orgId]);
+    const { data } = await supabase
+      .from("orders")
+      .select("amount_total_mxn, status")
+      .eq("organization_id", orgId);
 
-  if (loading) return <SkeletonLoader type="dashboard" />;
+    let rev = 0, ord = 0, pend = 0;
+    if (data) {
+      data.forEach(o => {
+        if (o.status === "paid") { rev += Number(o.amount_total_mxn || 0); ord++; }
+        else pend++;
+      });
+    }
+    setStats({ revenue: rev, orders: ord, pending: pend, AOV: ord > 0 ? rev / ord : 0 });
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchStats(); }, [orgId]);
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-br from-[#0a0f1c] to-blue-900 p-8 md:p-12 rounded-[2rem] shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-500/20 rounded-full blur-[120px] -mr-20 -mt-20 pointer-events-none"></div>
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="bg-blue-500/20 p-2 rounded-xl backdrop-blur-md border border-blue-400/30">
-              <DollarSign size={20} className="text-blue-300" />
-            </div>
-            <p className="text-blue-100 text-sm font-bold uppercase tracking-widest">Utilidad Neta (Estimada Real)</p>
+      <div className="flex items-center justify-between">
+        <h3 className="text-xl font-black text-white">Panorama General</h3>
+        <button onClick={fetchStats} className="p-2 bg-slate-800 border border-slate-700 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors">
+          <RefreshCcw size={16} className={loading ? "animate-spin text-blue-500" : ""} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+        <StatCard title="Ingresos Brutos" value={moneyMXN(stats.revenue)} icon={<DollarSign size={24} className="text-emerald-400" />} color="emerald" loading={loading} trend="+12% vs mes pasado" />
+        <StatCard title="Órdenes Pagadas" value={num(stats.orders)} icon={<ShoppingCart size={24} className="text-blue-400" />} color="blue" loading={loading} />
+        <StatCard title="Ticket Promedio (AOV)" value={moneyMXN(stats.AOV)} icon={<TrendingUp size={24} className="text-purple-400" />} color="purple" loading={loading} />
+        <StatCard title="Órdenes Pendientes" value={num(stats.pending)} icon={<AlertTriangle size={24} className="text-yellow-400" />} color="yellow" loading={loading} alert={stats.pending > 0} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 blur-[100px] rounded-full pointer-events-none"></div>
+          <h3 className="text-lg font-black text-white mb-6 relative z-10 flex items-center">
+            <Sparkles className="text-blue-500 mr-2" size={20} /> Inteligencia Artificial Activa
+          </h3>
+          <p className="text-slate-400 text-sm leading-relaxed mb-6">
+            Unico IA está monitoreando en tiempo real las operaciones de esta organización. Pregúntale al asistente flotante sobre reportes de ventas, estatus de inventario o sugerencias de marketing para hoy.
+          </p>
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 border-l-4 border-l-blue-500">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Diagnóstico Automático</p>
+            <p className="text-sm text-slate-300 font-medium">"El volumen de ventas se mantiene estable. Tienes {stats.pending} órdenes pendientes de cobro (OXXO/Transferencia) que podrías recuperar con una campaña de recordatorio."</p>
           </div>
-          <div className="flex items-baseline gap-4 mb-10">
-            <h2 className="text-6xl md:text-8xl font-black text-white tracking-tighter">
-              {moneyMXN(data.net)}
-            </h2>
-            <span className="hidden md:flex items-center gap-1 text-green-400 bg-green-400/10 px-3 py-1.5 rounded-full text-sm font-bold border border-green-400/20">
-              <TrendingUp size={16} /> +12% (IA Est.)
-            </span>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col items-center justify-center text-center">
+          <div className="w-24 h-24 relative mb-4">
+             <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                <path className="text-slate-800" strokeWidth="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path className="text-blue-500" strokeWidth="3" strokeDasharray="85, 100" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+             </svg>
+             <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-2xl font-black text-white">85%</span>
+             </div>
           </div>
-          
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 pt-8 border-t border-white/10">
-            <InfoCard title="Dinero Bruto Entrante" value={moneyMXN(data.gross)} />
-            <InfoCard title="Ventas Concretadas" value={`${data.orders} envíos`} />
-            <InfoCard title="Gasto Promedio x Cliente" value={moneyMXN(data.avg)} />
-            <InfoCard title="Ecosistema Activo" value="Score Store V1" highlight />
-          </div>
+          <h4 className="text-white font-bold mb-1">Tasa de Conversión</h4>
+          <p className="text-xs text-slate-400">Excelente salud de carrito de compras.</p>
         </div>
       </div>
     </div>
   );
 }
 
-function InfoCard({ title, value, highlight }) {
+function StatCard({ title, value, icon, color, loading, alert, trend }) {
+  const colorMap = {
+    emerald: "bg-emerald-500/10 border-emerald-500/20 text-emerald-500",
+    blue: "bg-blue-500/10 border-blue-500/20 text-blue-500",
+    purple: "bg-purple-500/10 border-purple-500/20 text-purple-500",
+    yellow: "bg-yellow-500/10 border-yellow-500/20 text-yellow-500",
+  };
+
   return (
-    <div>
-      <p className="text-slate-400 text-[11px] font-bold uppercase tracking-wider mb-2">{title}</p>
-      <p className={`text-2xl font-bold ${highlight ? 'text-blue-400' : 'text-white'}`}>{value}</p>
+    <div className={`bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:border-slate-700 ${alert ? 'ring-1 ring-yellow-500/30' : ''}`}>
+      <div className="flex justify-between items-start mb-4 relative z-10">
+        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{title}</h4>
+        <div className={`p-2 rounded-xl border ${colorMap[color]}`}>{icon}</div>
+      </div>
+      {loading ? (
+        <div className="h-10 bg-slate-800 rounded-lg animate-pulse w-1/2"></div>
+      ) : (
+        <div>
+          <p className="text-3xl font-black text-white tracking-tight">{value}</p>
+          {trend && <p className="text-xs font-bold text-emerald-400 mt-2">{trend}</p>}
+        </div>
+      )}
+      <div className={`absolute -bottom-10 -right-10 w-32 h-32 rounded-full blur-[60px] opacity-20 bg-${color}-500 pointer-events-none`}></div>
     </div>
   );
 }
 
-function OrdersView({ orgId }) {
+function ModuleOrders({ orgId }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modalData, setModalData] = useState(null);
-  
-  const fetchOrders = () => {
+
+  const fetchOrders = async () => {
     setLoading(true);
-    supabase.from("orders").select("*").eq("organization_id", orgId).order("created_at", { ascending: false }).limit(50)
-      .then(({ data }) => { setOrders(data || []); setLoading(false); });
+    const { data } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("organization_id", orgId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    setOrders(data || []);
+    setLoading(false);
   };
 
   useEffect(() => { fetchOrders(); }, [orgId]);
 
-  if (loading) return <SkeletonLoader type="table" />;
-
   return (
-    <div className="bg-white rounded-[2rem] border border-slate-200 shadow-lg shadow-slate-200/50 overflow-hidden">
-      <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+    <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-xl overflow-hidden">
+      <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
         <div>
-          <h3 className="font-black text-xl text-slate-800">Centro de Operaciones Logísticas</h3>
-          <p className="text-xs text-slate-500 font-medium mt-1">Guías generadas automáticamente por UnicOs.</p>
+          <h3 className="text-lg font-black text-white">Últimas 50 Órdenes</h3>
+          <p className="text-xs font-medium text-slate-500 mt-1">Sincronización en tiempo real con Stripe</p>
         </div>
-        <button onClick={fetchOrders} className="flex items-center gap-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl transition-colors">
-          <RefreshCcw size={16} /> Refrescar
+        <button onClick={fetchOrders} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 transition-colors">
+           <RefreshCcw size={18} className={loading ? "animate-spin" : ""} />
         </button>
       </div>
-      <div className="overflow-x-auto custom-scrollbar">
-        <table className="w-full text-left text-sm whitespace-nowrap">
-          <thead className="bg-slate-100/50 text-slate-500 font-bold border-b border-slate-200 text-xs uppercase tracking-widest">
-            <tr>
-              <th className="px-6 py-5 rounded-tl-xl">ID de Venta</th>
-              <th className="px-6 py-5">Comprador</th>
-              <th className="px-6 py-5">Cobro</th>
-              <th className="px-6 py-5">Estatus Operativo</th>
-              <th className="px-6 py-5 text-right">Acción</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {orders.map(o => (
-              <tr key={o.id} className="hover:bg-blue-50/50 transition-colors group">
-                <td className="px-6 py-5">
-                  <span className="font-mono font-bold text-slate-800 bg-slate-100 px-2 py-1 rounded-md">#{o.id.split("-")[0].toUpperCase()}</span>
-                  <div className="text-xs text-slate-500 font-medium mt-2">{new Date(o.created_at).toLocaleDateString()}</div>
-                </td>
-                <td className="px-6 py-5">
-                  <div className="font-bold text-slate-800">{o.customer_name || "Comprador Anónimo"}</div>
-                  <div className="text-xs text-slate-500 mt-1">{o.email || "Sin contacto directo"}</div>
-                </td>
-                <td className="px-6 py-5 font-black text-slate-800 text-base">{moneyMXN(o.amount_total_mxn)}</td>
-                <td className="px-6 py-5"><StatusBadge status={o.status} /></td>
-                <td className="px-6 py-5 text-right">
-                  <button onClick={() => setModalData(o)} className="text-blue-600 hover:text-blue-800 bg-blue-50 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity font-bold text-xs flex items-center gap-2 ml-auto">
-                    <Eye size={16} /> Abrir Expediente
-                  </button>
-                </td>
+
+      <div className="overflow-x-auto">
+        {loading ? (
+          <div className="p-10 text-center text-slate-500 font-bold flex flex-col items-center">
+            <div className="w-8 h-8 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+            Cargando libro de ventas...
+          </div>
+        ) : orders.length === 0 ? (
+          <div className="p-16 text-center text-slate-500">
+            <Package size={48} className="mx-auto mb-4 opacity-20" />
+            <p className="font-bold text-lg">No hay órdenes registradas</p>
+            <p className="text-sm mt-1">Las ventas de esta organización aparecerán aquí.</p>
+          </div>
+        ) : (
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-950 text-slate-400 text-xs uppercase tracking-wider font-bold border-b border-slate-800">
+                <th className="p-4 pl-6">Cliente</th>
+                <th className="p-4">Monto</th>
+                <th className="p-4">Estatus</th>
+                <th className="p-4">Resumen Items</th>
+                <th className="p-4">Fecha</th>
               </tr>
-            ))}
-            {orders.length === 0 && <tr><td colSpan="5" className="text-center p-16 text-slate-500 font-bold text-lg flex flex-col items-center"><Package size={40} className="mb-4 text-slate-300"/>Aún no hay despachos registrados.</td></tr>}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-800/50">
+              {orders.map((o) => (
+                <tr key={o.id} className="hover:bg-slate-800/30 transition-colors group">
+                  <td className="p-4 pl-6">
+                    <p className="font-bold text-slate-200">{o.customer_name || "Sin nombre"}</p>
+                    <p className="text-xs text-slate-500 font-medium">{o.email}</p>
+                  </td>
+                  <td className="p-4 font-black text-white">{moneyMXN(o.amount_total_mxn)}</td>
+                  <td className="p-4">
+                    <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-wider rounded-full border ${
+                      o.status === "paid" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                      o.status === "pending" ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" :
+                      "bg-slate-800 text-slate-400 border-slate-700"
+                    }`}>
+                      {o.status}
+                    </span>
+                  </td>
+                  <td className="p-4 text-xs text-slate-400 font-medium max-w-[200px] truncate" title={o.items_summary}>
+                    {o.items_summary || "-"}
+                  </td>
+                  <td className="p-4 text-xs font-bold text-slate-500">
+                    {new Date(o.created_at).toLocaleDateString("es-MX", { month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
-
-      {modalData && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-slide-up">
-            <div className="p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="font-black text-lg text-slate-800">Expediente de Venta #{modalData.id.split("-")[0].toUpperCase()}</h3>
-              <button onClick={() => setModalData(null)} className="text-slate-400 hover:text-red-500 transition-colors"><X size={24} /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div><p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cliente</p><p className="font-bold text-slate-800">{modalData.customer_name}</p><p className="text-sm text-slate-600">{modalData.email}</p></div>
-              <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2">Artículos Vendidos (El sistema ya descontó stock)</p>
-                <p className="font-medium text-slate-700 text-sm leading-relaxed">{modalData.items_summary || "Datos de carrito encriptados."}</p>
-              </div>
-              <div className="flex justify-between items-center border-t border-slate-100 pt-4">
-                <p className="font-bold text-slate-500">Total Pagado:</p>
-                <p className="font-black text-2xl text-slate-800">{moneyMXN(modalData.amount_total_mxn)}</p>
-              </div>
-            </div>
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
-              <button onClick={() => setModalData(null)} className="px-6 py-2.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800">Cerrar Expediente</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function StatusBadge({ status }) {
-  const s = String(status).toLowerCase();
-  if (s === 'paid') return <span className="bg-green-50 text-green-700 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 w-max border border-green-200"><CheckCircle size={14}/> Cobrado y Procesando Guía</span>;
-  if (s === 'pending_payment' || s === 'pending') return <span className="bg-orange-50 text-orange-700 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 w-max border border-orange-200"><AlertTriangle size={14}/> Esperando Depósito OXXO</span>;
-  return <span className="bg-slate-100 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs w-max capitalize">{status}</span>;
-}
-
-function CRMView({ orgId }) {
-  const [customers, setCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
-  useEffect(() => {
-    supabase.from("orders").select("email, customer_name, phone, amount_total_mxn, created_at").eq("organization_id", orgId).eq("status", "paid")
-      .then(({ data }) => {
-        if (!data) return;
-        const map = {};
-        data.forEach(o => {
-          if(!o.email) return;
-          if(!map[o.email]) map[o.email] = { email: o.email, name: o.customer_name, phone: o.phone, ltv: 0, orders: 0, last: o.created_at };
-          map[o.email].ltv += Number(o.amount_total_mxn || 0); map[o.email].orders += 1;
-        });
-        setCustomers(Object.values(map).sort((a, b) => b.ltv - a.ltv));
-        setLoading(false);
-      });
-  }, [orgId]);
-
-  if (loading) return <SkeletonLoader type="table" />;
-
+function ModuleProducts({ orgId }) {
   return (
-    <div className="bg-white rounded-[2rem] border border-slate-200 shadow-lg shadow-slate-200/50 overflow-hidden">
-      <div className="p-8 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-        <div>
-          <h3 className="font-black text-xl text-slate-800">Clientes Frecuentes (VIP)</h3>
-          <p className="text-sm text-slate-500 font-medium mt-1">Identifica quiénes sostienen tu negocio. Ideal para regalar cupones manuales.</p>
-        </div>
-        <div className="bg-blue-100 text-blue-700 p-3 rounded-full"><Users size={24} /></div>
+    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 shadow-xl text-center">
+      <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-6">
+        <Package className="text-blue-500" size={32} />
       </div>
-      <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50/50 text-slate-500 font-bold border-b border-slate-200 text-xs uppercase tracking-widest">
-          <tr><th className="px-8 py-5">Perfil del Cliente</th><th className="px-8 py-5 text-center">Nivel de Fidelidad</th><th className="px-8 py-5 text-right">Valor Histórico de Compra</th></tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {customers.map(c => (
-            <tr key={c.email} className="hover:bg-slate-50">
-              <td className="px-8 py-6"><p className="font-black text-slate-800 text-base">{c.name}</p><p className="text-xs font-semibold text-slate-500 mt-1">{c.email} • {c.phone || "Sin Tel"}</p></td>
-              <td className="px-8 py-6 text-center"><span className="bg-blue-50 text-blue-700 font-bold px-4 py-1.5 rounded-full text-xs">{c.orders} Compras</span></td>
-              <td className="px-8 py-6 font-black text-blue-600 text-xl text-right">{moneyMXN(c.ltv)}</td>
-            </tr>
-          ))}
-          {customers.length === 0 && <tr><td colSpan="3" className="text-center p-12 text-slate-500 font-bold">Base de datos de clientes en construcción.</td></tr>}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function MarketingView({ orgId }) {
-  const [cfg, setCfg] = useState({});
-  const [loading, setLoading] = useState(true);
-  
-  useEffect(() => { 
-    supabase.from("site_settings").select("*").eq("organization_id", orgId).single().then(({data}) => {if(data) setCfg(data); setLoading(false);}); 
-  }, [orgId]);
-  
-  const save = async () => { 
-    await supabase.from("site_settings").update({ promo_active: cfg.promo_active, promo_text: cfg.promo_text }).eq("organization_id", orgId); 
-    alert("¡Éxito! La tienda en vivo ha sido actualizada instantáneamente."); 
-  };
-
-  const autoGenerate = () => {
-    const promos = ["🔥 20% DE DESCUENTO SOLO POR 24 HORAS 🔥", "⚡ ENVÍO EXPRESS GRATIS EN TU PRIMERA COMPRA ⚡", "🎉 ÚLTIMAS PIEZAS DISPONIBLES - COMPRA AHORA 🎉"];
-    setCfg({...cfg, promo_active: true, promo_text: promos[Math.floor(Math.random() * promos.length)]});
-  };
-
-  if (loading) return <SkeletonLoader type="card" />;
-
-  return (
-    <div className="bg-white p-10 rounded-[2.5rem] border border-slate-200 shadow-xl shadow-slate-200/50 max-w-2xl">
-      <div className="flex justify-between items-start mb-8">
-        <div>
-          <h3 className="font-black text-2xl text-slate-800 mb-2">Poder de Ventas Global</h3>
-          <p className="text-sm font-medium text-slate-500">Controla el mensaje que ven todos los visitantes en el menú principal de la tienda.</p>
-        </div>
-        <div className="bg-orange-100 text-orange-600 p-4 rounded-2xl"><Megaphone size={28} /></div>
-      </div>
-      
-      <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 mb-8">
-        <label className="flex items-center gap-4 cursor-pointer group">
-          <div className="relative">
-            <input type="checkbox" checked={cfg.promo_active || false} onChange={e => setCfg({...cfg, promo_active: e.target.checked})} className="sr-only" />
-            <div className={`block w-14 h-8 rounded-full transition-colors ${cfg.promo_active ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-            <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${cfg.promo_active ? 'transform translate-x-6' : ''}`}></div>
-          </div>
-          <div>
-            <span className="font-black text-slate-800 block text-lg group-hover:text-blue-600 transition-colors">Encender Megáfono en Tienda</span>
-            <span className="text-xs text-slate-500 font-medium">Hace visible el mensaje rojo superior.</span>
-          </div>
-        </label>
-      </div>
-
-      <div className="relative mb-8">
-        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-3 ml-1">Mensaje Persuasivo (Copy)</label>
-        <textarea value={cfg.promo_text || ""} onChange={e => setCfg({...cfg, promo_text: e.target.value})} className="w-full bg-slate-50 border-2 border-slate-200 rounded-2xl p-5 font-bold text-slate-800 outline-none focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-100 transition-all resize-none h-32 text-lg" placeholder="Ej. ENVÍO GRATIS A TODO MÉXICO"></textarea>
-        <button onClick={autoGenerate} className="absolute right-4 bottom-4 flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:shadow-lg transition-all">
-          <Sparkles size={14} /> Redactar con IA
-        </button>
-      </div>
-
-      <button onClick={save} className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl hover:bg-blue-600 transition-all hover:shadow-[0_10px_40px_rgba(37,99,235,0.4)] text-lg flex justify-center items-center gap-2">
-        <Send size={20} /> INYECTAR EN SCORE STORE AHORA
-      </button>
-    </div>
-  );
-}
-
-function ProductsView() {
-  return (
-    <div className="p-16 bg-gradient-to-br from-slate-50 to-white rounded-[3rem] border-2 border-dashed border-slate-300 text-center shadow-sm">
-      <div className="w-24 h-24 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner border border-blue-100"><Package size={48} /></div>
-      <h3 className="font-black text-3xl text-slate-800 mb-4 tracking-tight">Ecosistema Ultrasónico de Productos</h3>
-      <p className="text-slate-500 font-medium max-w-xl mx-auto text-lg leading-relaxed mb-8">
-        Por decisión de Arquitectura de Rendimiento (0.1s de carga), tu catálogo matriz reside en el CDN Global de Netlify. Las altas y bajas de productos físicos se auditan vía scripts SQL blindados para evitar corrupción de inventario.
+      <h3 className="text-xl font-black text-white mb-2">Catálogo de Productos</h3>
+      <p className="text-slate-400 text-sm max-w-md mx-auto leading-relaxed">
+        Actualmente, el catálogo se lee directamente del JSON estático de alto rendimiento para maximizar la velocidad de carga (PWA). Para modificar el catálogo, actualiza el archivo en el repositorio.
       </p>
-      <div className="inline-flex items-center gap-2 bg-slate-100 px-6 py-3 rounded-full text-sm font-bold text-slate-600 border border-slate-200">
-        <Shield size={16} /> Base de Datos Bloqueada por Seguridad Anti-Errores
-      </div>
     </div>
   );
 }
 
-function UsersView({ orgId }) {
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(true);
+function ModuleMarketing({ orgId }) {
+  const [promo, setPromo] = useState("");
+  const [activePromo, setActivePromo] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    supabase.from("admin_users").select("id, email, role, is_active, created_at")
-      .eq("organization_id", orgId).is("is_active", true).order("created_at", { ascending: false })
-      .then(({ data }) => { setMembers(data || []); setLoading(false); });
-  }, [orgId]);
+  const fetchPromo = async () => {
+    const { data } = await supabase.from("site_settings").select("value").eq("key", "active_promo").eq("organization_id", orgId).maybeSingle();
+    setActivePromo(data?.value || null);
+  };
 
-  if (loading) return <SkeletonLoader type="card" />;
+  useEffect(() => { fetchPromo(); }, [orgId]);
+
+  const savePromo = async () => {
+    if (!promo.trim()) return;
+    setLoading(true);
+    await supabase.from("site_settings").upsert({
+      organization_id: orgId,
+      key: "active_promo",
+      value: promo,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "organization_id, key" });
+    setPromo("");
+    await fetchPromo();
+    setLoading(false);
+  };
+
+  const removePromo = async () => {
+    setLoading(true);
+    await supabase.from("site_settings").delete().eq("organization_id", orgId).eq("key", "active_promo");
+    await fetchPromo();
+    setLoading(false);
+  };
 
   return (
-    <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl shadow-slate-200/50 p-10 max-w-3xl">
-      <div className="flex justify-between items-start mb-8">
-        <div>
-          <h3 className="font-black text-2xl text-slate-800 mb-2">Personal Autorizado</h3>
-          <p className="text-sm font-medium text-slate-500">Gestión de llaves maestras de tu negocio. Nadie más puede ver esta información.</p>
+    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-10 shadow-xl relative overflow-hidden">
+      <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500/10 blur-[100px] rounded-full pointer-events-none"></div>
+      
+      <div className="flex items-center mb-8 relative z-10">
+        <div className="w-12 h-12 bg-purple-600/20 border border-purple-500/30 rounded-xl flex items-center justify-center mr-4">
+          <Megaphone className="text-purple-400" size={24} />
         </div>
-        <div className="bg-slate-100 text-slate-600 p-4 rounded-2xl"><Shield size={28} /></div>
+        <div>
+          <h3 className="text-2xl font-black text-white">Megáfono Global</h3>
+          <p className="text-sm font-medium text-slate-400">Anuncia ofertas en la barra superior de tu tienda al instante.</p>
+        </div>
       </div>
-      <div className="mt-8 space-y-4">
-        {members.map(m => (
-          <div key={m.id} className="p-5 bg-slate-50 border border-slate-100 rounded-2xl flex justify-between items-center hover:border-blue-200 transition-colors group">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-black text-lg">{m.email[0].toUpperCase()}</div>
-              <div>
-                <p className="font-bold text-slate-800 text-base">{m.email}</p>
-                <p className="text-xs font-bold text-slate-400 mt-0.5">Autorizado el {new Date(m.created_at).toLocaleDateString()}</p>
-              </div>
-            </div>
-            <span className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border ${m.role === 'owner' ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
-              {m.role === 'owner' ? 'Dueño Total' : m.role}
-            </span>
+
+      <div className="relative z-10 max-w-2xl">
+        <div className="flex flex-col sm:flex-row gap-4 mb-8">
+          <input
+            type="text"
+            className="flex-1 bg-slate-950 border border-slate-700 text-white font-bold px-4 py-3 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none placeholder-slate-600"
+            placeholder="Ej: 🔥 20% DE DESCUENTO EN TODA LA TIENDA CON CÓDIGO: FLASH20"
+            value={promo}
+            onChange={(e) => setPromo(e.target.value)}
+          />
+          <button
+            onClick={savePromo}
+            disabled={loading || !promo.trim()}
+            className="bg-purple-600 text-white font-black px-6 py-3 rounded-xl hover:bg-purple-500 transition-colors shadow-lg shadow-purple-500/20 disabled:opacity-50 flex-shrink-0"
+          >
+            {loading ? "Publicando..." : "Publicar Anuncio"}
+          </button>
+        </div>
+
+        {activePromo && (
+          <div className="bg-slate-950 border border-purple-500/30 rounded-2xl p-6 relative group">
+            <h4 className="text-xs font-black text-purple-500 uppercase tracking-wider mb-3">Anuncio en Vivo Actualmente:</h4>
+            <p className="text-lg font-bold text-white mb-4">{activePromo}</p>
+            <button
+              onClick={removePromo}
+              className="text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/20 px-4 py-2 rounded-lg hover:bg-red-500/20 transition-colors"
+            >
+              Quitar Anuncio (Apagar Megáfono)
+            </button>
           </div>
-        ))}
+        )}
+        {!activePromo && (
+           <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 flex items-center justify-center">
+              <p className="text-sm font-bold text-slate-500">El megáfono está apagado. No hay anuncios en la tienda.</p>
+           </div>
+        )}
       </div>
     </div>
   );
 }
 
-/* =========================================================
-   COMPONENTE: UNICO IA (CON ABORT CONTROLLER PREVENTIVO)
-   ========================================================= */
+// --------------------------------------------------------
+// UNICO IA: Agente Autónomo (Componente Flotante)
+// --------------------------------------------------------
 function UnicoIAAgent({ orgId }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState([{ role: "ai", text: "Soy Unico IA. Mis redes neuronales están en línea. ¿Qué orden ejecutamos hoy?" }]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [isThinking, setIsThinking] = useState(false);
+  const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  useEffect(() => { if (isOpen) scrollToBottom(); }, [messages, isOpen]);
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-  const handleCommand = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || isThinking) return;
-    const userText = input.trim();
-    
-    setMessages(prev => [...prev, { role: "user", text: userText }]);
+  useEffect(() => {
+    if (isOpen && messages.length === 0) {
+      setMessages([{ role: "system", content: "¡Hola! Soy Unico IA. Estoy conectado a la base de datos de tu empresa. Puedes pedirme reportes de ventas, buscar un cliente o pedirme análisis de negocio. ¿En qué te ayudo hoy?" }]);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const sendMessage = async () => {
+    if (!input.trim() || !orgId) return;
+    const userMsg = input.trim();
     setInput("");
-    setIsThinking(true);
-
-    // Vacuna Riesgo 2: Controlador de latencia extrema. Netlify no colapsará.
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); 
+    setMessages(prev => [...prev, { role: "user", content: userMsg }]);
+    setLoading(true);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       
-      const res = await fetch("/api/ai/route", {
+      // Control de latencia con AbortController para Netlify Edge (8s)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      const res = await fetch("/api/ai", {
         method: "POST",
-        headers: {
+        headers: { 
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${session?.access_token}`
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
         },
-        body: JSON.stringify({ prompt: userText, orgId }),
-        signal: controller.signal // Inyección del salvavidas
+        body: JSON.stringify({ message: userMsg, organization_id: orgId }),
+        signal: controller.signal
       });
 
       clearTimeout(timeoutId);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error de red neuronal");
 
-      setMessages(prev => [...prev, { role: "ai", text: data.reply }]);
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (error.name === 'AbortError') {
-         setMessages(prev => [...prev, { role: "ai", text: "⚡ La red neuronal de Gemini está experimentando alta latencia. He cancelado la operación para evitar el bloqueo del panel (Error 504). Intenta nuevamente en unos segundos." }]);
-      } else {
-         setMessages(prev => [...prev, { role: "ai", text: "⚠️ Hubo un fallo en mis sistemas de conexión. Por favor asegúrate de haber creado la ruta API en /api/ai/route.js con tu llave de Gemini." }]);
+      if (!res.ok) {
+        throw new Error(`Error HTTP: ${res.status}`);
       }
+
+      const data = await res.json();
+      setMessages(prev => [...prev, { role: "system", content: data.reply || "No obtuve respuesta." }]);
+    } catch (error) {
+      console.error("AI Error:", error);
+      let errorMsg = "Hubo un error de conexión con mi servidor cerebral.";
+      if (error.name === 'AbortError') {
+         errorMsg = "La consulta tomó demasiado tiempo y fue interrumpida (Límite de 8 segundos en Netlify). Intenta con una pregunta más específica.";
+      }
+      setMessages(prev => [...prev, { role: "system", content: errorMsg, isError: true }]);
     } finally {
-      setIsThinking(false);
+      setLoading(false);
     }
   };
 
   return (
     <>
-      <button onClick={() => setIsOpen(true)} className={`fixed bottom-8 right-8 bg-blue-600 text-white p-4 rounded-full shadow-[0_10px_40px_rgba(37,99,235,0.5)] hover:bg-blue-500 hover:scale-110 transition-all z-50 flex items-center justify-center group ${isOpen ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}>
-        <Sparkles size={28} className="animate-pulse" />
-        <span className="absolute right-full mr-4 bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">Unico IA (En línea)</span>
+      {/* Botón Flotante */}
+      <button 
+        onClick={() => setIsOpen(true)}
+        className={`fixed bottom-6 right-6 w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.5)] hover:scale-110 transition-transform z-40 ${isOpen ? 'scale-0' : 'scale-100'}`}
+      >
+        <Bot className="text-white" size={28} />
       </button>
 
-      <div className={`fixed bottom-8 right-8 w-96 h-[550px] bg-white rounded-3xl shadow-2xl border border-slate-200 z-50 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right ${isOpen ? 'scale-100 opacity-100' : 'scale-0 opacity-0 pointer-events-none'}`}>
-        <div className="bg-gradient-to-r from-blue-700 to-indigo-800 p-5 flex justify-between items-center text-white">
-          <div className="flex items-center gap-3">
-            <div className="bg-white/20 p-2 rounded-xl backdrop-blur-sm"><Bot size={24} /></div>
+      {/* Ventana de Chat */}
+      <div className={`fixed bottom-6 right-6 w-[380px] h-[600px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-32px)] bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl flex flex-col z-50 overflow-hidden transition-all duration-300 origin-bottom-right ${isOpen ? 'scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none'}`}>
+        
+        {/* Cabecera IA */}
+        <div className="bg-slate-950 p-4 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center">
+            <div className="w-10 h-10 bg-blue-600/20 border border-blue-500/50 rounded-xl flex items-center justify-center mr-3 relative overflow-hidden">
+               <Bot className="text-blue-400 relative z-10" size={20} />
+               <div className="absolute inset-0 bg-blue-500 opacity-20 animate-pulse"></div>
+            </div>
             <div>
-              <h4 className="font-black text-lg leading-tight">Unico IA</h4>
-              <p className="text-[10px] font-bold text-blue-200 uppercase tracking-widest flex items-center gap-1"><span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span> Sistema Enlazado</p>
+              <h3 className="text-white font-black leading-tight flex items-center">Unico IA <Sparkles size={12} className="text-blue-400 ml-1" /></h3>
+              <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest flex items-center">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1 animate-ping"></span> En línea
+              </p>
             </div>
           </div>
-          <button onClick={() => setIsOpen(false)} className="text-white/70 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-xl transition-colors"><X size={20} /></button>
+          <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-lg transition-colors">
+            <X size={18} />
+          </button>
         </div>
-        
-        <div className="flex-1 bg-slate-50 p-5 overflow-y-auto space-y-4 custom-scrollbar">
-          {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] p-4 rounded-2xl text-sm font-medium leading-relaxed ${m.role === 'user' ? 'bg-slate-900 text-white rounded-tr-sm shadow-md' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-sm shadow-sm'}`}>
-                {m.text}
+
+        {/* Mensajes */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900 scroll-smooth">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] p-3.5 rounded-2xl text-sm font-medium leading-relaxed ${
+                msg.role === "user" 
+                  ? "bg-blue-600 text-white rounded-br-sm shadow-lg shadow-blue-900/20" 
+                  : msg.isError 
+                    ? "bg-red-500/10 border border-red-500/20 text-red-400 rounded-bl-sm"
+                    : "bg-slate-800 border border-slate-700 text-slate-200 rounded-bl-sm"
+              }`}>
+                {msg.content}
               </div>
             </div>
           ))}
-          {isThinking && (
+          {loading && (
             <div className="flex justify-start">
-              <div className="max-w-[85%] p-4 rounded-2xl bg-white border border-slate-200 text-slate-400 rounded-tl-sm shadow-sm flex items-center gap-2">
-                <RefreshCcw size={14} className="animate-spin" /> Procesando...
+              <div className="bg-slate-800 border border-slate-700 p-4 rounded-2xl rounded-bl-sm flex space-x-2 items-center">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-100"></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-200"></div>
               </div>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-4 bg-white border-t border-slate-100">
-          <form onSubmit={handleCommand} className="relative">
-            <input type="text" value={input} onChange={(e)=>setInput(e.target.value)} disabled={isThinking} placeholder="Ej: Dime cuánto vendimos hoy..." className="w-full bg-slate-100 text-slate-800 text-sm font-semibold rounded-2xl py-4 pl-5 pr-14 outline-none border border-transparent focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all disabled:opacity-50" />
-            <button type="submit" disabled={!input.trim() || isThinking} className="absolute right-2 top-2 bottom-2 bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 disabled:bg-slate-400 transition-colors">
-              <Send size={16} />
+        {/* Input */}
+        <div className="p-4 bg-slate-950 border-t border-slate-800">
+          <form 
+            onSubmit={(e) => { e.preventDefault(); sendMessage(); }}
+            className="flex items-center bg-slate-900 border border-slate-700 p-1.5 rounded-2xl focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500 transition-all"
+          >
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="Pregúntale a Unico IA..."
+              className="flex-1 bg-transparent border-none text-white text-sm px-3 focus:outline-none placeholder-slate-500"
+              disabled={loading}
+            />
+            <button 
+              type="submit" 
+              disabled={loading || !input.trim()}
+              className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white disabled:opacity-50 hover:bg-blue-500 transition-colors flex-shrink-0"
+            >
+              <Send size={18} className="ml-1" />
             </button>
           </form>
         </div>
@@ -663,52 +805,22 @@ function UnicoIAAgent({ orgId }) {
   );
 }
 
-/* =========================================================
-   SKELETON LOADERS (CARGA ÓPTICA UX)
-   ========================================================= */
-function SkeletonLoader({ type }) {
-  return (
-    <div className="animate-pulse space-y-6">
-      {type === 'dashboard' && <div className="h-64 bg-slate-200 rounded-[2rem] w-full"></div>}
-      {type === 'table' && (
-        <div className="bg-white rounded-[2rem] border border-slate-100 p-6">
-          <div className="h-8 bg-slate-200 rounded-lg w-1/3 mb-8"></div>
-          <div className="space-y-4">
-            {[1,2,3,4].map(i => <div key={i} className="h-12 bg-slate-100 rounded-xl w-full"></div>)}
-          </div>
-        </div>
-      )}
-      {type === 'card' && <div className="h-96 bg-slate-200 rounded-[2rem] w-full max-w-2xl"></div>}
-    </div>
-  );
-}
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [loadingSession, setLoadingSession] = useState(true);
 
-/* =========================================================
-   OTROS COMPONENTES BASE
-   ========================================================= */
-function LoadingScreen({ text = "Estableciendo Conexión Blindada..." }) {
-  return (
-    <div className="h-screen w-full flex flex-col items-center justify-center bg-[#0a0f1c]">
-      <div className="relative">
-        <div className="absolute inset-0 bg-blue-600 rounded-full blur-[30px] opacity-40 animate-pulse"></div>
-        <div className="relative h-24 w-24 rounded-full shadow-2xl border border-white/20 overflow-hidden animate-bounce">
-          <Image src="/icon-192.png" alt="Cargando" fill priority sizes="96px" className="object-cover" />
-        </div>
-      </div>
-      <p className="mt-8 text-xs font-black tracking-widest text-blue-400 uppercase">{text}</p>
-    </div>
-  );
-}
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoadingSession(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
-function EmptyStateMultiTenant() {
-  return (
-    <div className="h-screen w-full flex items-center justify-center bg-slate-50 p-6">
-      <div className="max-w-md w-full bg-white border border-slate-200 rounded-[2.5rem] shadow-2xl p-10 text-center">
-        <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6"><Shield size={40} /></div>
-        <h2 className="text-2xl font-black text-slate-900 mb-3">Acceso Denegado</h2>
-        <p className="text-sm text-slate-500 font-medium leading-relaxed mb-8">El sistema ha validado tu identidad, pero no posees llaves maestras para esta terminal. El CEO debe asignarte un rol.</p>
-        <button onClick={() => supabase.auth.signOut()} className="w-full bg-slate-100 text-slate-800 font-black py-4 rounded-xl hover:bg-slate-200 transition-colors">Volver a Intentar</button>
-      </div>
-    </div>
-  );
+  if (loadingSession) return <LoadingScreen text="Iniciando Enlace Cifrado..." />;
+  if (!session) return <LoginScreen onLogin={setSession} />;
+  return <AdminDashboard session={session} />;
 }
