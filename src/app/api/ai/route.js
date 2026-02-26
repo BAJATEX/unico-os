@@ -1,11 +1,12 @@
-// src/app/api/ai/route.js
-export const dynamic = 'force-dynamic'; // Vacuna Riesgo 1: Evita que Next.js cachee las respuestas de la IA
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+function json(status, payload) {
+  return NextResponse.json(payload, { status });
+}
 
 function getBearerToken(req) {
   const h = req.headers.get("authorization") || "";
@@ -13,57 +14,167 @@ function getBearerToken(req) {
   return m ? m[1] : "";
 }
 
+const clampStr = (v, max = 2000) => String(v || "").trim().slice(0, max);
+
 export async function POST(req) {
   try {
-    const sb = serverSupabase();
-    const token = getBearerToken(req);
+    const body = await req.json().catch(() => ({}));
 
-    const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    // FIX REAL: acepta ambos contratos (front viejo y nuevo)
+    const prompt = clampStr(body.prompt ?? body.message ?? body.text, 2000);
+    const orgId = clampStr(
+      body.orgId ?? body.organization_id ?? body.organizationId ?? body.org_id,
+      128
+    );
 
-    const body = await req.json();
-    const { prompt, orgId } = body;
-    if (!prompt || !orgId) return NextResponse.json({ error: "Faltan datos" }, { status: 400 });
-
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      systemInstruction: "Eres 'Unico IA', el agente autónomo de élite del panel UnicOs. Administras la tienda 'Score Store'. Tu tono es profesional, conciso y tecnológico. Tienes acceso a la base de datos."
-    });
-
-    const getMetricsTool = async () => {
-      const { data } = await sb.from("orders").select("amount_total_mxn").eq("organization_id", orgId).eq("status", "paid");
-      const total = (data || []).reduce((acc, curr) => acc + Number(curr.amount_total_mxn || 0), 0);
-      return `Los ingresos totales pagados son $${total} MXN de ${data?.length || 0} pedidos.`;
-    };
-
-    const updatePromoTool = async (promoText) => {
-      await sb.from("site_settings").update({ promo_active: true, promo_text: promoText }).eq("organization_id", orgId);
-      return `Éxito. El cintillo de la tienda ahora está activo y dice: "${promoText}".`;
-    };
-
-    let finalResponse = "";
-    const p = prompt.toLowerCase();
-
-    if (p.includes("venta") || p.includes("ingreso") || p.includes("dinero") || p.includes("resumen")) {
-      const metrics = await getMetricsTool();
-      const result = await model.generateContent(`El usuario preguntó: "${prompt}". Los datos reales de la base de datos son: ${metrics}. Respondele al usuario de forma ejecutiva dándole estos datos.`);
-      finalResponse = result.response.text();
-    } 
-    else if (p.includes("promo") || p.includes("marketing") || p.includes("cintillo")) {
-      const copyResult = await model.generateContent(`El usuario quiere una promoción: "${prompt}". Escribe SOLO UNA FRASE CORTA, persuasiva y en MAYÚSCULAS con emojis para un cintillo de tienda online. Nada más.`);
-      const copy = copyResult.response.text().trim();
-      await updatePromoTool(copy);
-      finalResponse = `Listo. He activado la campaña en la tienda en vivo. El mensaje actual es: ${copy}`;
-    } 
-    else {
-      const result = await model.generateContent(prompt);
-      finalResponse = result.response.text();
+    if (!prompt || !orgId) {
+      return json(400, {
+        error:
+          "Faltan datos. Se requiere 'message' o 'prompt' y 'organization_id' u 'orgId'.",
+      });
     }
 
-    return NextResponse.json({ reply: finalResponse });
+    // Validación llaves IA
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+      return json(503, {
+        error:
+          "Unico IA está desconectada: falta GEMINI_API_KEY en variables de entorno (Netlify Production).",
+      });
+    }
 
+    // Cliente Supabase server-side (requiere secret key en Netlify)
+    let sb;
+    try {
+      sb = serverSupabase();
+    } catch (e) {
+      return json(503, { error: e?.message || "Falta SUPABASE_SECRET_KEY en Netlify." });
+    }
+
+    // Auth real por JWT
+    const token = getBearerToken(req);
+    const { user, error: authErr } = await requireUserFromToken(sb, token);
+    if (authErr) return json(401, { error: "No autorizado. Vuelve a iniciar sesión." });
+
+    // -----------------------------
+    // TOOLS (acciones reales)
+    // -----------------------------
+    const tool_salesSummary = async () => {
+      const { data, error } = await sb
+        .from("orders")
+        .select("amount_total_mxn,status")
+        .eq("organization_id", orgId);
+
+      if (error) return `No pude leer ventas (orders). Motivo: ${error.message}`;
+
+      const paid = (data || []).filter((o) => String(o.status) === "paid");
+      const total = paid.reduce((acc, o) => acc + Number(o.amount_total_mxn || 0), 0);
+
+      return `Ventas pagadas: ${paid.length} pedidos. Ingresos: $${total.toLocaleString("es-MX")} MXN.`;
+    };
+
+    const tool_setPromo = async (text) => {
+      const promoText = clampStr(text, 160);
+
+      const { error } = await sb
+        .from("site_settings")
+        .upsert(
+          {
+            organization_id: orgId,
+            promo_active: true,
+            promo_text: promoText,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "organization_id" }
+        );
+
+      if (error) return `No pude activar el megáfono. Motivo: ${error.message}`;
+      return `Megáfono ACTIVADO. Mensaje: "${promoText}"`;
+    };
+
+    const tool_disablePromo = async () => {
+      const { error } = await sb
+        .from("site_settings")
+        .upsert(
+          {
+            organization_id: orgId,
+            promo_active: false,
+            promo_text: null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "organization_id" }
+        );
+
+      if (error) return `No pude apagar el megáfono. Motivo: ${error.message}`;
+      return "Megáfono APAGADO.";
+    };
+
+    const tool_lowStock = async () => {
+      // Si products no existe en tu DB, esto regresará error claro
+      const { data, error } = await sb
+        .from("products")
+        .select("name,sku,stock")
+        .eq("organization_id", orgId)
+        .is("deleted_at", null)
+        .order("stock", { ascending: true })
+        .limit(10);
+
+      if (error) return `No pude leer inventario (products). Motivo: ${error.message}`;
+      const low = (data || []).filter((p) => Number(p.stock || 0) <= 5);
+      if (!low.length) return "Inventario OK: no hay productos críticos (≤5).";
+      return `Stock crítico (≤5):\n- ${low
+        .map((p) => `${p.sku || "SIN-SKU"} · ${p.name} · stock=${p.stock}`)
+        .join("\n- ")}`;
+    };
+
+    // Router simple de intención (sin “magia”)
+    const p = prompt.toLowerCase();
+    let toolContext = "";
+
+    if (p.includes("venta") || p.includes("ingreso") || p.includes("resumen") || p.includes("total")) {
+      toolContext = await tool_salesSummary();
+    } else if (p.includes("promo") || p.includes("megáfono") || p.includes("cintillo")) {
+      // “apaga / desactiva”
+      if (p.includes("apaga") || p.includes("desactiva") || p.includes("quita")) {
+        toolContext = await tool_disablePromo();
+      } else {
+        // si no trae texto explícito, Gemini genera el copy y luego lo aplicamos
+        toolContext = "El usuario quiere activar una promo.";
+      }
+    } else if (p.includes("stock") || p.includes("inventario")) {
+      toolContext = await tool_lowStock();
+    }
+
+    // Gemini (respuesta ejecutiva)
+    const genAI = new GoogleGenerativeAI(geminiKey);
+    const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      systemInstruction:
+        "Eres 'Unico IA', el agente ejecutivo-operativo del panel UnicOs. Respondes claro, sin tecnicismos innecesarios, con pasos accionables. Si el usuario pide acciones (promo/stock/ventas), confirma lo ejecutado o explica por qué no se pudo.",
+    });
+
+    // Si pidió promo pero no dio texto, generamos uno y lo activamos
+    if (toolContext === "El usuario quiere activar una promo.") {
+      const copyResult = await model.generateContent(
+        `Genera SOLO una frase corta (máximo 120 caracteres), persuasiva, en MAYÚSCULAS con 1-2 emojis para un cintillo de tienda. Contexto: "${prompt}"`
+      );
+      const copy = clampStr(copyResult.response.text(), 160);
+      toolContext = await tool_setPromo(copy);
+      return json(200, { reply: `Listo.\n${toolContext}` });
+    }
+
+    const finalPrompt =
+      toolContext
+        ? `Usuario: "${prompt}"\n\nDatos/Acciones reales del sistema:\n${toolContext}\n\nResponde con un resumen ejecutivo + siguiente acción recomendada.`
+        : prompt;
+
+    const result = await model.generateContent(finalPrompt);
+    const reply = clampStr(result?.response?.text?.() || result?.response?.text?.() || result?.response?.text?.(), 2500);
+
+    return json(200, { reply: reply || "No obtuve respuesta." });
   } catch (error) {
     console.error("Error en Unico IA:", error);
-    return NextResponse.json({ error: "Error en el procesamiento neuronal." }, { status: 500 });
+    return json(500, { error: "Error en el procesamiento neuronal.", detail: error?.message || String(error) });
   }
 }
