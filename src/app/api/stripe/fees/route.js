@@ -12,15 +12,29 @@ function getBearerToken(req) {
   return m ? m[1] : "";
 }
 
-const isUuid = (s) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "").trim());
-
 const normEmail = (s) => String(s || "").trim().toLowerCase();
+
+const isUuid = (s) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    String(s || "").trim()
+  );
+
 const toMajor = (minor) => Number(minor || 0) / 100;
 
 function fxUsdToMxn() {
-  const fx = Number(process.env.FX_USD_TO_MXN || NaN);
+  const fx = Number(process.env.FX_USD_TO_MXN || process.env.USD_TO_MXN || NaN);
   return Number.isFinite(fx) && fx > 0 ? fx : null;
+}
+
+function clampList(arr, max = 120) {
+  const out = [];
+  for (const v of Array.isArray(arr) ? arr : []) {
+    const s = String(v || "").trim();
+    if (!s) continue;
+    out.push(s);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 async function fetchStripeSession(sessionId, stripeKey) {
@@ -39,15 +53,23 @@ async function fetchStripeSession(sessionId, stripeKey) {
 
 function extractFee(session) {
   const bt = session?.payment_intent?.latest_charge?.balance_transaction;
-  const fee = Number(bt?.fee || 0);
+  const feeMinor = Number(bt?.fee || 0);
   const currency = String(bt?.currency || session?.currency || "mxn").toLowerCase();
-  return { feeMinor: fee, currency };
+  return { feeMinor, currency };
 }
 
 export async function POST(req) {
   try {
-    const stripeKey = process.env.STRIPE_SECRET_KEY;
-    if (!stripeKey) return json(200, { ok: false, mode: "estimate", error: "STRIPE_SECRET_KEY no configurado." });
+    const stripeKey =
+      process.env.STRIPE_SECRET_KEY || process.env.STRIPE_API_KEY || process.env.STRIPE_SK;
+
+    if (!stripeKey) {
+      return json(200, {
+        ok: false,
+        mode: "estimate",
+        error: "STRIPE_SECRET_KEY no configurado en el servidor.",
+      });
+    }
 
     const sb = serverSupabase();
     const token = getBearerToken(req);
@@ -56,13 +78,15 @@ export async function POST(req) {
 
     const body = await req.json().catch(() => ({}));
     const orgId = String(body?.org_id || "").trim();
-    const ids = Array.isArray(body?.stripe_session_ids) ? body.stripe_session_ids : [];
+    const sessionIds = clampList(body?.stripe_session_ids, 120);
 
-    if (!isUuid(orgId) || !ids.length) return json(400, { ok: false, error: "org_id y stripe_session_ids requeridos." });
+    if (!isUuid(orgId) || sessionIds.length === 0) {
+      return json(400, { ok: false, error: "org_id (uuid) y stripe_session_ids requeridos." });
+    }
 
-    // membership check
+    // Membership check (cualquier rol activo puede ver métricas)
     const email = normEmail(user?.email);
-    const { data: mem } = await sb
+    const { data: mem, error: memErr } = await sb
       .from("admin_users")
       .select("role,is_active")
       .eq("organization_id", orgId)
@@ -70,49 +94,59 @@ export async function POST(req) {
       .eq("is_active", true)
       .maybeSingle();
 
+    if (memErr) return json(500, { ok: false, error: memErr.message });
     if (!mem) return json(403, { ok: false, error: "Acceso denegado." });
 
-    // fetch sessions (limited concurrency)
-    const sessionIds = ids.map((x) => String(x || "").trim()).filter(Boolean).slice(0, 120);
+    // Concurrency control
     const limit = 6;
     let idx = 0;
-
     const results = [];
+
     const worker = async () => {
       while (idx < sessionIds.length) {
-        const id = sessionIds[idx++];
+        const sid = sessionIds[idx++];
         try {
-          const s = await fetchStripeSession(id, stripeKey);
-          results.push({ id, session: s });
+          const session = await fetchStripeSession(sid, stripeKey);
+          results.push({ sid, session });
         } catch (e) {
-          results.push({ id, error: String(e?.message || e) });
+          results.push({ sid, error: String(e?.message || e) });
         }
       }
     };
 
     await Promise.all(Array.from({ length: Math.min(limit, sessionIds.length) }, worker));
 
-    let totalMxn = 0;
-    let usdMinor = 0;
+    let totalFeeMxn = 0;
+    let feeUsdMinor = 0;
+    let missing = 0;
 
     for (const r of results) {
-      if (!r?.session) continue;
+      if (!r?.session) {
+        missing += 1;
+        continue;
+      }
       const { feeMinor, currency } = extractFee(r.session);
-      if (!feeMinor) continue;
+      if (!feeMinor) {
+        missing += 1;
+        continue;
+      }
 
-      if (currency === "mxn") totalMxn += toMajor(feeMinor);
-      else if (currency === "usd") usdMinor += feeMinor;
+      if (currency === "mxn") totalFeeMxn += toMajor(feeMinor);
+      else if (currency === "usd") feeUsdMinor += feeMinor;
+      else missing += 1;
     }
 
     const fx = fxUsdToMxn();
-    if (fx && usdMinor) totalMxn += toMajor(usdMinor) * fx;
+    const converted = Boolean(fx && feeUsdMinor);
+    if (converted) totalFeeMxn += toMajor(feeUsdMinor) * fx;
 
     return json(200, {
       ok: true,
       mode: "stripe",
-      total_fee_mxn: Number(totalMxn.toFixed(2)),
+      total_fee_mxn: Number(totalFeeMxn.toFixed(2)),
       processed: sessionIds.length,
-      converted_usd: Boolean(fx && usdMinor),
+      missing,
+      converted_usd: converted,
       fx_usd_to_mxn: fx || null,
     });
   } catch (e) {
