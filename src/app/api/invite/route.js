@@ -2,55 +2,69 @@ import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
 import { canManageUsers } from "@/lib/authz";
 
-function json(status, body) { return NextResponse.json(body, { status }); }
+function json(status, body) {
+  return NextResponse.json(body, { status });
+}
 
 function getBearerToken(req) {
   const m = (req.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
   return m ? m[1] : "";
 }
 
+const normEmail = (s) => String(s || "").trim().toLowerCase();
+
 export async function POST(req) {
   try {
     const sb = serverSupabase();
     const token = getBearerToken(req);
+
     const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr) return json(401, { error: authErr });
+    if (authErr) return json(401, { error: "No autorizado" });
 
-    const { organization_id, email, role } = await req.json();
-    if (!organization_id || !email || !role) return json(400, { error: "Datos incompletos" });
+    const body = await req.json().catch(() => ({}));
+    const organization_id = String(body.organization_id || "").trim();
+    const email = normEmail(body.email);
+    const role = String(body.role || "").trim().toLowerCase();
 
-    const cleanEmail = String(email).trim().toLowerCase();
-    const cleanRole = String(role).trim().toLowerCase();
-    const requesterEmail = String(user?.email || "").trim().toLowerCase();
+    if (!organization_id || !email || !role) {
+      return json(400, { error: "Datos incompletos" });
+    }
 
-    // 1. Validar si el usuario actual es Owner/Admin (Usando admin_users de Score Store)
+    const allowedRoles = ["owner", "admin", "ops", "marketing", "staff", "viewer", "sales"];
+    if (!allowedRoles.includes(role)) {
+      return json(400, { error: "Rol inválido" });
+    }
+
+    const requesterEmail = normEmail(user?.email);
+
     const { data: reqUser, error: memErr } = await sb
       .from("admin_users")
       .select("role")
       .eq("organization_id", organization_id)
       .eq("email", requesterEmail)
-      .is("is_active", true)
+      .eq("is_active", true)
       .maybeSingle();
 
     if (memErr) return json(500, { error: memErr.message });
-    const reqRole = (reqUser?.role || "viewer").toLowerCase();
-    if (!canManageUsers(reqRole)) return json(403, { error: "Privilegios insuficientes" });
 
-    // 2. Invitar vía Supabase Auth
-    const { error: invErr } = await sb.auth.admin.inviteUserByEmail(cleanEmail);
-    if (invErr && !invErr.message.includes("already registered")) {
+    const reqRole = String(reqUser?.role || "viewer").toLowerCase();
+    if (!canManageUsers(reqRole)) {
+      return json(403, { error: "Privilegios insuficientes" });
+    }
+
+    const { error: invErr } = await sb.auth.admin.inviteUserByEmail(email);
+    if (invErr && !String(invErr.message || "").toLowerCase().includes("already registered")) {
       return json(500, { error: invErr.message });
     }
 
-    // 3. Upsert en admin_users
     const { error: upErr } = await sb
       .from("admin_users")
-      .upsert(
-        { organization_id, email: cleanEmail, role: cleanRole, is_active: true },
-        { onConflict: "organization_id,email" } 
-      );
+      .upsert({ organization_id, email, role, is_active: true }, { onConflict: "organization_id,email" });
 
     if (upErr) return json(500, { error: upErr.message });
-    return json(200, { ok: true, email: cleanEmail, role: cleanRole, organization_id });
-  } catch (e) { return json(500, { error: e?.message || "Server error" }); }
+
+    return json(200, { ok: true, email, role, organization_id });
+  } catch (e) {
+    return json(500, { error: String(e?.message || "Server error") });
+  }
 }
