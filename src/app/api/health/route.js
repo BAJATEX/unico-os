@@ -16,27 +16,25 @@ export async function GET(req) {
     const token = getBearerToken(req);
 
     const { error } = await requireUserFromToken(sb, token);
-    if (error) {
-      return NextResponse.json({ ok: false, error: "No autorizado" }, { status: 401 });
-    }
+    if (error) return NextResponse.json({ ok: false, error: "No autorizado" }, { status: 401 });
 
     return NextResponse.json(
       {
         ok: true,
         env: {
           SUPABASE_URL: Boolean(process.env.SUPABASE_URL),
-          SUPABASE_SECRET_KEY: Boolean(
-            process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
-          ),
+          SUPABASE_SECRET_KEY: Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY),
           GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
+
+          STRIPE_SECRET_KEY: Boolean(process.env.STRIPE_SECRET_KEY),
+          ENVIA_API_KEY: Boolean(process.env.ENVIA_API_KEY),
+
+          FX_USD_TO_MXN: Boolean(process.env.FX_USD_TO_MXN),
         },
       },
       { status: 200 }
     );
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: "Error interno", detail: String(e?.message || e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: "Error interno", detail: String(e?.message || e) }, { status: 500 });
   }
 }
