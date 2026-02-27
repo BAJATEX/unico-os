@@ -5,37 +5,29 @@ import { useEffect } from "react";
 
 /**
  * SwRegister (UnicOs)
+ * Objetivo: 0 errores en consola + 0 loops + Lighthouse estable.
  *
- * Objetivo: mantener Lighthouse alto y evitar errores en consola.
- * - Si /sw.js responde HTML (por redirect / 404), NO intentamos registrar.
- * - Evita loops de recarga con un flag en sessionStorage.
+ * Claves:
+ * - Registramos el SW cuando la página ya está "estable" (load/idle),
+ *   para que Lighthouse no marque "loaded too slowly" por interferencia del SW.
+ * - Si hay update, hacemos 1 solo reload por pestaña (sessionStorage flag).
+ * - Silencioso: NO hacemos console.warn/error (Best Practices).
  */
 
 const SW_URL = "/sw.js";
+const RELOAD_KEY = "__unicos_sw_reloaded__";
 
-const isLikelyJs = (contentType) => {
-  const ct = String(contentType || "").toLowerCase();
-  return ct.includes("javascript") || ct.includes("ecmascript") || ct.includes("text/plain");
-};
+function schedule(fn) {
+  const run = () => {
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(() => fn(), { timeout: 1500 });
+    } else {
+      setTimeout(fn, 250);
+    }
+  };
 
-async function canRegisterServiceWorker() {
-  try {
-    if (!window.isSecureContext) return false;
-
-    const res = await fetch(SW_URL, {
-      cache: "no-store",
-      headers: { "cache-control": "no-cache" },
-    });
-
-    if (!res.ok) return false;
-
-    const ct = res.headers.get("content-type") || "";
-    if (ct.toLowerCase().includes("text/html")) return false;
-
-    return isLikelyJs(ct);
-  } catch {
-    return false;
-  }
+  if (document.readyState === "complete") run();
+  else window.addEventListener("load", run, { once: true });
 }
 
 export default function SwRegister() {
@@ -50,8 +42,8 @@ export default function SwRegister() {
       refreshing = true;
 
       try {
-        if (sessionStorage.getItem("__unicos_sw_reload__") === "1") return;
-        sessionStorage.setItem("__unicos_sw_reload__", "1");
+        if (sessionStorage.getItem(RELOAD_KEY) === "1") return;
+        sessionStorage.setItem(RELOAD_KEY, "1");
       } catch {}
 
       window.location.reload();
@@ -59,12 +51,13 @@ export default function SwRegister() {
 
     const register = async () => {
       try {
-        const ok = await canRegisterServiceWorker();
-        if (!ok) return;
-
         const reg = await navigator.serviceWorker.register(SW_URL, { scope: "/" });
 
-        if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        if (reg.waiting) {
+          try {
+            reg.waiting.postMessage({ type: "SKIP_WAITING" });
+          } catch {}
+        }
 
         reg.addEventListener("updatefound", () => {
           const w = reg.installing;
@@ -81,11 +74,11 @@ export default function SwRegister() {
 
         navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
       } catch {
-        // Silencioso: la idea es NO ensuciar consola (Lighthouse)
+        // Silencioso
       }
     };
 
-    register();
+    schedule(register);
 
     return () => {
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
