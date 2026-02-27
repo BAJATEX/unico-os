@@ -8,8 +8,7 @@ import { useEffect } from "react";
  * Objetivo: 0 errores en consola + 0 loops + Lighthouse estable.
  *
  * Claves:
- * - Registramos el SW cuando la página ya está "estable" (load/idle),
- *   para que Lighthouse no marque "loaded too slowly" por interferencia del SW.
+ * - Registramos el SW cuando la página ya está estable (load/idle) para no afectar métricas.
  * - Si hay update, hacemos 1 solo reload por pestaña (sessionStorage flag).
  * - Silencioso: NO hacemos console.warn/error (Best Practices).
  */
@@ -53,6 +52,7 @@ export default function SwRegister() {
       try {
         const reg = await navigator.serviceWorker.register(SW_URL, { scope: "/" });
 
+        // Si hay update esperando, lo activamos inmediatamente (sin ruido).
         if (reg.waiting) {
           try {
             reg.waiting.postMessage({ type: "SKIP_WAITING" });
