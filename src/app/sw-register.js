@@ -1,22 +1,17 @@
-// src/app/sw-register.js
 "use client";
 
 import { useEffect } from "react";
 
 /**
- * SwRegister (UnicOs)
- * Objetivo: 0 errores en consola + 0 loops + Lighthouse estable.
- *
- * Claves:
- * - Registramos el SW cuando la página ya está estable (load/idle) para no afectar métricas.
- * - Si hay update, hacemos 1 solo reload por pestaña (sessionStorage flag).
- * - Silencioso: NO hacemos console.warn/error (Best Practices).
+ * UnicOs — Service Worker Register (PRO)
+ * - Lighthouse-safe: NO forced reload on controllerchange.
+ * - Update-ready: asks SW to SKIP_WAITING so the new SW activates ASAP.
+ * - Update applies on next navigation/refresh (no sudden interruption).
  */
 
 const SW_URL = "/sw.js";
-const RELOAD_KEY = "__unicos_sw_reloaded__";
 
-function schedule(fn) {
+function runWhenIdle(fn) {
   const run = () => {
     if ("requestIdleCallback" in window) {
       window.requestIdleCallback(() => fn(), { timeout: 1500 });
@@ -34,54 +29,48 @@ export default function SwRegister() {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
 
-    let refreshing = false;
-
-    const onControllerChange = () => {
-      if (refreshing) return;
-      refreshing = true;
-
-      try {
-        if (sessionStorage.getItem(RELOAD_KEY) === "1") return;
-        sessionStorage.setItem(RELOAD_KEY, "1");
-      } catch {}
-
-      window.location.reload();
-    };
+    let isMounted = true;
 
     const register = async () => {
       try {
         const reg = await navigator.serviceWorker.register(SW_URL, { scope: "/" });
+        if (!isMounted) return;
 
-        // Si hay update esperando, lo activamos inmediatamente (sin ruido).
+        // If an update is already waiting, activate it (no reload).
         if (reg.waiting) {
           try {
             reg.waiting.postMessage({ type: "SKIP_WAITING" });
           } catch {}
         }
 
+        // Listen for new updates.
         reg.addEventListener("updatefound", () => {
-          const w = reg.installing;
-          if (!w) return;
+          const sw = reg.installing;
+          if (!sw) return;
 
-          w.addEventListener("statechange", () => {
-            if (w.state === "installed" && navigator.serviceWorker.controller) {
+          sw.addEventListener("statechange", () => {
+            // When installed AND there is an existing controller, it means it's an update.
+            if (sw.state === "installed" && navigator.serviceWorker.controller) {
               try {
-                w.postMessage({ type: "SKIP_WAITING" });
+                sw.postMessage({ type: "SKIP_WAITING" });
               } catch {}
+              // No auto-reload here (Lighthouse-safe + UX-safe).
             }
           });
         });
 
-        navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+        // Controller change means new SW is controlling the page.
+        // We intentionally DO NOT reload here.
+        // Users will naturally get the updated shell on next visit/refresh.
       } catch {
-        // Silencioso
+        // silent
       }
     };
 
-    schedule(register);
+    runWhenIdle(register);
 
     return () => {
-      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      isMounted = false;
     };
   }, []);
 
