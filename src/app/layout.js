@@ -1,10 +1,6 @@
 import "./globals.css";
 import SwRegister from "./sw-register";
 
-// CSP Nonce requiere render dinámico (para tener request/headers por visita)
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export const viewport = {
   themeColor: "#0f0f10",
   width: "device-width",
