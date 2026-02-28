@@ -737,6 +737,63 @@ function Shell({ session }) {
       </main>
     </div>
   );
+}
+/* =========================================================
+   ORG BOOTSTRAP (auto-recovery)
+   ========================================================= */
+function BootstrapGate({ token, onSignOut }) {
+  const [state, setState] = useState({ busy: true, error: "" });
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/bootstrap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        });
+
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j?.ok) throw new Error(j?.error || "No se pudo activar el acceso.");
+
+        if (alive) window.location.reload();
+      } catch (e) {
+        if (!alive) return;
+        setState({ busy: false, error: String(e?.message || e) });
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [token]);
+
+  if (state.busy) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50">
+        <div className="max-w-md w-full bg-white border border-slate-200 rounded-[2rem] shadow-2xl p-8 text-center">
+          <div className="mx-auto h-16 w-16 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center mb-6">
+            <Sparkles size={32} />
+          </div>
+          <h2 className="text-xl font-black text-slate-900 mb-2">Activando acceso…</h2>
+          <p className="text-sm text-slate-500 font-semibold leading-relaxed">
+            Configurando organizaciones, permisos y seguridad.
+          </p>
+          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mt-5">
+            UnicOs
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <EmptyState
+      title="Error: No se encontró la organización."
+      desc={state.error || "Tu cuenta existe, pero no está vinculada a ninguna organización con acceso admin."}
+      actionLabel="Salir"
+      onAction={onSignOut}
+    />
+  );
 } =========================================================
    DASHBOARD (Stripe + Envía + Score 70%)
    ========================================================= */
