@@ -4,9 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
 
-function json(status, body) {
-  return NextResponse.json(body, { status });
-}
+const json = (status, payload) => NextResponse.json(payload, { status });
 
 function getBearerToken(req) {
   const h = req.headers.get("authorization") || "";
@@ -14,33 +12,36 @@ function getBearerToken(req) {
   return m ? m[1] : "";
 }
 
+const isUuid = (s) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    String(s || "").trim()
+  );
+
 const normEmail = (s) => String(s || "").trim().toLowerCase();
 
-const ALLOWED_ORDER_PATCH_KEYS = new Set(["status"]);
 const ALLOWED_STATUS = new Set([
-  "pending",
-  "pending_payment",
   "paid",
+  "pending_payment",
+  "pending",
   "payment_failed",
   "fulfilled",
   "cancelled",
+  "refunded",
 ]);
 
-function sanitizePatch(patch) {
-  const clean = {};
-  const src = patch && typeof patch === "object" ? patch : {};
-  for (const k of Object.keys(src)) {
-    if (!ALLOWED_ORDER_PATCH_KEYS.has(k)) continue;
-    clean[k] = src[k];
+function pickPatch(patch) {
+  const out = {};
+  if (!patch || typeof patch !== "object") return out;
+
+  if (typeof patch.status === "string") {
+    const st = patch.status.trim().toLowerCase();
+    if (ALLOWED_STATUS.has(st)) out.status = st;
   }
 
-  if ("status" in clean) {
-    const v = String(clean.status || "").trim().toLowerCase();
-    if (!ALLOWED_STATUS.has(v)) delete clean.status;
-    else clean.status = v;
-  }
+  // Puedes extender aquí con campos permitidos reales, sin abrir superficie.
+  // Ej: out.tracking_number = ... (si decides guardarlo en orders)
 
-  return clean;
+  return out;
 }
 
 export async function POST(req) {
@@ -49,52 +50,50 @@ export async function POST(req) {
     const token = getBearerToken(req);
 
     const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr) return json(401, { error: "No autorizado" });
+    if (authErr) return json(401, { ok: false, error: "No autorizado" });
 
     const body = await req.json().catch(() => ({}));
-    const org_id = String(body?.org_id || "").trim();
-    const order_id = String(body?.order_id || "").trim();
-    const patch = body?.patch;
+    const orgId = String(body?.org_id || "").trim();
+    const orderId = String(body?.order_id || "").trim();
+    const patch = pickPatch(body?.patch);
 
-    if (!org_id || !order_id || !patch) {
-      return json(400, { error: "Faltan datos requeridos" });
+    if (!isUuid(orgId) || !orderId) {
+      return json(400, { ok: false, error: "org_id y order_id requeridos." });
+    }
+    if (!Object.keys(patch).length) {
+      return json(400, { ok: false, error: "Patch inválido o vacío." });
     }
 
-    const requesterEmail = normEmail(user?.email);
-
-    // FIX REAL: `.is()` es para NULL. Para boolean debe ser `.eq()`.
+    // Membership check (solo ops/admin/owner)
+    const email = normEmail(user?.email);
     const { data: mem, error: memErr } = await sb
       .from("admin_users")
-      .select("role")
-      .eq("organization_id", org_id)
-      .eq("email", requesterEmail)
+      .select("role,is_active")
+      .eq("organization_id", orgId)
+      .ilike("email", email)
       .eq("is_active", true)
       .maybeSingle();
 
-    if (memErr) return json(500, { error: memErr.message });
-    if (!mem) return json(403, { error: "Acceso denegado: Usuario inactivo o sin membresía." });
-
-    const role = String(mem?.role || "viewer").toLowerCase();
-    const canWrite = ["owner", "admin", "ops"].includes(role);
-    if (!canWrite) return json(403, { error: "Permisos insuficientes" });
-
-    const cleanPatch = sanitizePatch(patch);
-    if (!Object.keys(cleanPatch).length) {
-      return json(400, { error: "No hay campos permitidos para actualizar" });
+    if (memErr) return json(500, { ok: false, error: memErr.message });
+    const role = String(mem?.role || "").toLowerCase();
+    if (!mem || !["owner", "admin", "ops"].includes(role)) {
+      return json(403, { ok: false, error: "Permisos insuficientes." });
     }
 
-    const { data, error } = await sb
+    // Update order (orders.organization_id)
+    const { data: updated, error: upErr } = await sb
       .from("orders")
-      .update(cleanPatch)
-      .eq("organization_id", org_id)
-      .eq("id", order_id)
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("organization_id", orgId)
+      .eq("id", orderId)
       .select("*")
-      .single();
+      .maybeSingle();
 
-    if (error) return json(500, { error: error.message });
+    if (upErr) return json(400, { ok: false, error: upErr.message });
+    if (!updated) return json(404, { ok: false, error: "Pedido no encontrado." });
 
-    return json(200, { ok: true, order: data });
+    return json(200, { ok: true, order: updated });
   } catch (e) {
-    return json(500, { error: String(e?.message || "Server error") });
+    return json(500, { ok: false, error: String(e?.message || e) });
   }
 }
