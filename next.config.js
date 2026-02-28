@@ -1,19 +1,30 @@
 /** @type {import('next').NextConfig} */
 
-const SUPABASE_HOST = "lpbzndnavkbpxwnlbqgb.supabase.co";
+// UnicOs — Next config (seguro + Lighthouse-friendly)
+
+const FALLBACK_SUPABASE_HOST = "lpbzndnavkbpxwnlbqgb.supabase.co";
+
+function supabaseHost() {
+  try {
+    const u = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    if (!u) return FALLBACK_SUPABASE_HOST;
+    return new URL(u).hostname || FALLBACK_SUPABASE_HOST;
+  } catch {
+    return FALLBACK_SUPABASE_HOST;
+  }
+}
+
+const SUPABASE_HOST = supabaseHost();
 
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "img-src 'self' data: blob: https://" + SUPABASE_HOST,
-  // Next usa estilos inline en varios casos => mantenemos unsafe-inline
+  `img-src 'self' data: blob: https://${SUPABASE_HOST}`,
   "style-src 'self' 'unsafe-inline'",
-  // Next incluye scripts inline de bootstrap => mantenemos unsafe-inline
-  // (pero removemos unsafe-eval)
   "script-src 'self' 'unsafe-inline'",
-  "connect-src 'self' https://" + SUPABASE_HOST + " wss://" + SUPABASE_HOST + " https://generativelanguage.googleapis.com",
+  `connect-src 'self' https://${SUPABASE_HOST} wss://${SUPABASE_HOST} https://generativelanguage.googleapis.com https://api.stripe.com`,
   "font-src 'self' data:",
   "manifest-src 'self'",
   "worker-src 'self' blob:",
@@ -30,6 +41,7 @@ const securityHeaders = [
 
 const nextConfig = {
   output: "standalone",
+  reactStrictMode: true,
   images: {
     remotePatterns: [{ protocol: "https", hostname: SUPABASE_HOST }],
   },
