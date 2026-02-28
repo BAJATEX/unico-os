@@ -1,6 +1,6 @@
-/* UnicOs — Service Worker PRO (Next-safe) */
+/* UnicOs — Service Worker PRO (Next-safe + Lighthouse-safe) */
 
-const VERSION = "unicos-sw-2026-02-27";
+const VERSION = "unicos-sw-2026-02-27b";
 const STATIC_CACHE = `unicos-static-${VERSION}`;
 const RUNTIME_CACHE = `unicos-runtime-${VERSION}`;
 
@@ -9,10 +9,9 @@ const PRECACHE = [
   "/manifest.json",
   "/icon-192.png",
   "/icon-512.png",
-  "/logo-unico.png", // puede no existir: lo intentamos sin romper
 ];
 
-// Helper: precache sin fallar si un asset no existe (logo-unico.png)
+// Precache (sin romper si algo falta)
 async function safePrecache() {
   const cache = await caches.open(STATIC_CACHE);
   for (const path of PRECACHE) {
@@ -27,14 +26,30 @@ async function safePrecache() {
 
 self.addEventListener("install", (event) => {
   event.waitUntil(safePrecache());
-  // NO skipWaiting automático: evita cambios sorpresa durante auditorías
+  // NO skipWaiting automático (evita comportamiento raro en auditorías)
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
+      // Enable Navigation Preload (reduce bugs de DevTools/Lighthouse con SW)
+      try {
+        if (self.registration?.navigationPreload) {
+          await self.registration.navigationPreload.enable();
+        }
+      } catch {
+        // ignore
+      }
+
       const keys = await caches.keys();
-      await Promise.all(keys.map((k) => (k.startsWith("unicos-") && k !== STATIC_CACHE && k !== RUNTIME_CACHE ? caches.delete(k) : null)));
+      await Promise.all(
+        keys.map((k) =>
+          k.startsWith("unicos-") && k !== STATIC_CACHE && k !== RUNTIME_CACHE
+            ? caches.delete(k)
+            : null
+        )
+      );
+
       await self.clients.claim();
     })()
   );
@@ -74,13 +89,21 @@ self.addEventListener("fetch", (event) => {
 
   if (req.method !== "GET") return;
 
-  // Navegación: network-first + fallback offline (NO cacheamos HTML)
+  // Navegación: usa preloadResponse si existe (evita bug de Lighthouse/DevTools)
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req).catch(async () => {
-        const cache = await caches.open(STATIC_CACHE);
-        return (await cache.match("/offline.html")) || new Response("Offline", { status: 503 });
-      })
+      (async () => {
+        try {
+          const preload = await event.preloadResponse;
+          if (preload) return preload;
+
+          const network = await fetch(req);
+          return network;
+        } catch {
+          const cache = await caches.open(STATIC_CACHE);
+          return (await cache.match("/offline.html")) || new Response("Offline", { status: 503 });
+        }
+      })()
     );
     return;
   }
@@ -88,10 +111,10 @@ self.addEventListener("fetch", (event) => {
   // Solo mismo origen
   if (url.origin !== self.location.origin) return;
 
-  // Nunca cachear APIs ni data dinámica
+  // Nunca cachear APIs
   if (url.pathname.startsWith("/api/")) return;
 
-  // Next static chunks (hash) => cache-first (seguro)
+  // Next static chunks (hashed) => cache-first
   if (url.pathname.startsWith("/_next/static/")) {
     event.respondWith(cacheFirst(req, STATIC_CACHE));
     return;
@@ -103,7 +126,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Imágenes locales => stale-while-revalidate
+  // Imágenes locales => SWR
   if (/\.(png|jpg|jpeg|webp|svg|ico)$/i.test(url.pathname)) {
     event.respondWith(staleWhileRevalidate(req, RUNTIME_CACHE));
     return;
