@@ -1,3 +1,4 @@
+// src/app/api/stripe/fees/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,7 @@ async function getMyRole(sb, orgId, user) {
   return String(mem?.role || "").toLowerCase();
 }
 
+// FX simple (si tu Stripe opera en USD)
 function fxToMXN(currency) {
   const c = String(currency || "mxn").toLowerCase();
   if (c === "mxn") return 1;
@@ -173,7 +175,7 @@ export async function POST(req) {
       actor_user_id: user?.id || null,
       action: "stripe.fees.compute",
       entity: "stripe",
-      entity_id: sessions.length,
+      entity_id: String(sessions.length),
       summary: `Computed Stripe fees for ${sessions.length} sessions`,
       meta: { count: sessions.length },
       ip: req.headers.get("x-forwarded-for") || null,
