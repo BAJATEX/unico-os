@@ -1,8 +1,9 @@
-// src/app/api/orders/update/route.js
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
+import { hasPerm } from "@/lib/authz";
 import { writeAudit } from "@/lib/auditServer";
 
 const json = (status, payload) => NextResponse.json(payload, { status });
@@ -21,24 +22,31 @@ const isUuid = (s) =>
 const normEmail = (s) => String(s || "").trim().toLowerCase();
 
 const ALLOWED_STATUS = new Set([
-  "paid",
-  "pending_payment",
   "pending",
+  "pending_payment",
+  "paid",
   "payment_failed",
   "fulfilled",
   "cancelled",
   "refunded",
 ]);
 
-function pickPatch(patch) {
-  const out = {};
-  if (!patch || typeof patch !== "object") return out;
+async function getMyRole(sb, orgId, user) {
+  const myEmail = normEmail(user?.email);
 
-  if (typeof patch.status === "string") {
-    const st = patch.status.trim().toLowerCase();
-    if (ALLOWED_STATUS.has(st)) out.status = st;
-  }
-  return out;
+  const { data: mem } = await sb
+    .from("admin_users")
+    .select("role,is_active")
+    .eq("organization_id", orgId)
+    .eq("is_active", true)
+    .or(
+      `user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`
+    )
+    .limit(1)
+    .maybeSingle();
+
+  if (!mem?.is_active) return null;
+  return String(mem?.role || "").toLowerCase();
 }
 
 export async function POST(req) {
@@ -52,62 +60,52 @@ export async function POST(req) {
     const body = await req.json().catch(() => ({}));
     const orgId = String(body?.org_id || "").trim();
     const orderId = String(body?.order_id || "").trim();
-    const patch = pickPatch(body?.patch);
+    const patch = body?.patch && typeof body.patch === "object" ? body.patch : {};
 
-    if (!isUuid(orgId) || !orderId) return json(400, { ok: false, error: "org_id y order_id requeridos." });
-    if (!Object.keys(patch).length) return json(400, { ok: false, error: "Patch inválido o vacío." });
+    if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido" });
+    if (!isUuid(orderId)) return json(400, { ok: false, error: "order_id inválido" });
 
-    // Membership check (solo ops/admin/owner)
-    const email = normEmail(user?.email);
-    const { data: mem, error: memErr } = await sb
-      .from("admin_users")
-      .select("role,is_active")
-      .eq("organization_id", orgId)
-      .ilike("email", email)
-      .eq("is_active", true)
-      .maybeSingle();
+    const role = await getMyRole(sb, orgId, user);
+    if (!role || !hasPerm(role, "orders")) return json(403, { ok: false, error: "Permisos insuficientes" });
 
-    if (memErr) return json(500, { ok: false, error: memErr.message });
-    const role = String(mem?.role || "").toLowerCase();
-    if (!mem || !["owner", "admin", "ops"].includes(role)) {
-      return json(403, { ok: false, error: "Permisos insuficientes." });
-    }
+    const newStatus = String(patch?.status || "").trim().toLowerCase();
+    if (!ALLOWED_STATUS.has(newStatus)) return json(400, { ok: false, error: "status inválido" });
 
-    // read-before (for audit)
-    const { data: before } = await sb
+    const { data: before, error: eBefore } = await sb
       .from("orders")
-      .select("id, status")
-      .eq("organization_id", orgId)
+      .select("id,status,organization_id,stripe_session_id,updated_at")
       .eq("id", orderId)
+      .eq("organization_id", orgId)
       .maybeSingle();
 
-    const { data: updated, error: upErr } = await sb
+    if (eBefore || !before) return json(404, { ok: false, error: "Pedido no encontrado" });
+
+    const { data: after, error: eUpd } = await sb
       .from("orders")
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq("organization_id", orgId)
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
       .eq("id", orderId)
-      .select("*")
+      .eq("organization_id", orgId)
+      .select("id,status,updated_at")
       .maybeSingle();
 
-    if (upErr) return json(400, { ok: false, error: upErr.message });
-    if (!updated) return json(404, { ok: false, error: "Pedido no encontrado." });
+    if (eUpd) return json(400, { ok: false, error: eUpd.message });
 
     await writeAudit(sb, {
       organization_id: orgId,
-      actor_email: email,
+      actor_email: normEmail(user?.email),
       actor_user_id: user?.id || null,
-      action: "orders.update",
+      action: "orders.update_status",
       entity: "orders",
-      entity_id: String(orderId),
-      summary: `Order status: ${before?.status || "?"} → ${updated?.status || "?"}`,
-      before: before ? { status: before.status } : null,
-      after: { status: updated.status },
-      meta: { role },
+      entity_id: orderId,
+      summary: `Updated order status to ${newStatus}`,
+      before,
+      after,
+      meta: { stripe_session_id: before?.stripe_session_id || null, role },
       ip: req.headers.get("x-forwarded-for") || null,
       user_agent: req.headers.get("user-agent") || null,
     });
 
-    return json(200, { ok: true, order: updated });
+    return json(200, { ok: true, order: after });
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
   }
