@@ -4,22 +4,34 @@
 import { useEffect } from "react";
 
 /**
- * SW Register (safe):
- * - registra PWA
- * - NO fuerza reload (evita Best Practices = 0 por navegación durante auditoría)
+ * SW Register (Lighthouse-safe)
+ * - Registra el SW después de load/idle para evitar bugs de DevTools/Lighthouse con MainDocumentContent
  */
 export default function SwRegister() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
 
-    (async () => {
+    const register = async () => {
       try {
         await navigator.serviceWorker.register("/sw.js", { scope: "/" });
       } catch {
         // silence
       }
-    })();
+    };
+
+    const onLoad = () => {
+      if ("requestIdleCallback" in window) {
+        window.requestIdleCallback(() => register(), { timeout: 2500 });
+      } else {
+        setTimeout(() => register(), 1200);
+      }
+    };
+
+    if (document.readyState === "complete") onLoad();
+    else window.addEventListener("load", onLoad, { once: true });
+
+    return () => window.removeEventListener("load", onLoad);
   }, []);
 
   return null;
