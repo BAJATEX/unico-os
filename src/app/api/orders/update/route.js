@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
+import { writeAudit } from "@/lib/auditServer";
 
 const json = (status, payload) => NextResponse.json(payload, { status });
 
@@ -37,10 +38,6 @@ function pickPatch(patch) {
     const st = patch.status.trim().toLowerCase();
     if (ALLOWED_STATUS.has(st)) out.status = st;
   }
-
-  // Puedes extender aquí con campos permitidos reales, sin abrir superficie.
-  // Ej: out.tracking_number = ... (si decides guardarlo en orders)
-
   return out;
 }
 
@@ -57,12 +54,8 @@ export async function POST(req) {
     const orderId = String(body?.order_id || "").trim();
     const patch = pickPatch(body?.patch);
 
-    if (!isUuid(orgId) || !orderId) {
-      return json(400, { ok: false, error: "org_id y order_id requeridos." });
-    }
-    if (!Object.keys(patch).length) {
-      return json(400, { ok: false, error: "Patch inválido o vacío." });
-    }
+    if (!isUuid(orgId) || !orderId) return json(400, { ok: false, error: "org_id y order_id requeridos." });
+    if (!Object.keys(patch).length) return json(400, { ok: false, error: "Patch inválido o vacío." });
 
     // Membership check (solo ops/admin/owner)
     const email = normEmail(user?.email);
@@ -80,7 +73,14 @@ export async function POST(req) {
       return json(403, { ok: false, error: "Permisos insuficientes." });
     }
 
-    // Update order (orders.organization_id)
+    // read-before (for audit)
+    const { data: before } = await sb
+      .from("orders")
+      .select("id, status")
+      .eq("organization_id", orgId)
+      .eq("id", orderId)
+      .maybeSingle();
+
     const { data: updated, error: upErr } = await sb
       .from("orders")
       .update({ ...patch, updated_at: new Date().toISOString() })
@@ -91,6 +91,21 @@ export async function POST(req) {
 
     if (upErr) return json(400, { ok: false, error: upErr.message });
     if (!updated) return json(404, { ok: false, error: "Pedido no encontrado." });
+
+    await writeAudit(sb, {
+      organization_id: orgId,
+      actor_email: email,
+      actor_user_id: user?.id || null,
+      action: "orders.update",
+      entity: "orders",
+      entity_id: String(orderId),
+      summary: `Order status: ${before?.status || "?"} → ${updated?.status || "?"}`,
+      before: before ? { status: before.status } : null,
+      after: { status: updated.status },
+      meta: { role },
+      ip: req.headers.get("x-forwarded-for") || null,
+      user_agent: req.headers.get("user-agent") || null,
+    });
 
     return json(200, { ok: true, order: updated });
   } catch (e) {
