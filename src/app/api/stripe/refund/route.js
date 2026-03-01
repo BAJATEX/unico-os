@@ -1,8 +1,11 @@
 // src/app/api/stripe/refund/route.js
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
+import { hasPerm } from "@/lib/authz";
+import { writeAudit } from "@/lib/auditServer";
 
 const json = (status, payload) => NextResponse.json(payload, { status });
 
@@ -13,6 +16,23 @@ function getBearerToken(req) {
 }
 
 const normEmail = (s) => String(s || "").trim().toLowerCase();
+
+async function getMyRole(sb, orgId, user) {
+  const myEmail = normEmail(user?.email);
+  const { data: mem } = await sb
+    .from("admin_users")
+    .select("role,is_active")
+    .eq("organization_id", orgId)
+    .eq("is_active", true)
+    .or(
+      `user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`
+    )
+    .limit(1)
+    .maybeSingle();
+
+  if (!mem?.is_active) return null;
+  return String(mem?.role || "").toLowerCase();
+}
 
 export async function POST(req) {
   try {
@@ -31,23 +51,14 @@ export async function POST(req) {
 
     if (!orgId || !orderId) return json(400, { ok: false, error: "org_id y order_id requeridos." });
 
-    // membership check (solo owner/admin)
-    const email = normEmail(user?.email);
-    const { data: mem } = await sb
-      .from("admin_users")
-      .select("role,is_active")
-      .eq("organization_id", orgId)
-      .ilike("email", email)
-      .eq("is_active", true)
-      .maybeSingle();
+    const role = await getMyRole(sb, orgId, user);
+    if (!role || !hasPerm(role, "orders")) {
+      return json(403, { ok: false, error: "Permisos insuficientes." });
+    }
 
-    const role = String(mem?.role || "").toLowerCase();
-    if (!mem || !["owner", "admin"].includes(role)) return json(403, { ok: false, error: "Permisos insuficientes." });
-
-    // get order
     const { data: order, error: oErr } = await sb
       .from("orders")
-      .select("id, stripe_payment_intent_id, stripe_session_id, status")
+      .select("id, stripe_payment_intent_id, stripe_session_id, status, amount_total_mxn")
       .eq("organization_id", orgId)
       .eq("id", orderId)
       .maybeSingle();
@@ -57,7 +68,6 @@ export async function POST(req) {
     const pi = String(order?.stripe_payment_intent_id || "").trim();
     if (!pi) return json(400, { ok: false, error: "Este pedido no tiene payment_intent en DB." });
 
-    // create refund via Stripe API
     const payload = new URLSearchParams();
     payload.set("payment_intent", pi);
 
@@ -70,17 +80,38 @@ export async function POST(req) {
       body: payload.toString(),
     });
 
-    const data = await res.json().catch(() => null);
-    if (!res.ok) return json(400, { ok: false, error: data?.error?.message || "Stripe refund error." });
+    const refund = await res.json().catch(() => null);
+    if (!res.ok) return json(400, { ok: false, error: refund?.error?.message || "Stripe refund error." });
 
-    // mark order status (soft)
+    const before = { status: order?.status || null };
     await sb
       .from("orders")
       .update({ status: "refunded", updated_at: new Date().toISOString() })
       .eq("organization_id", orgId)
       .eq("id", orderId);
 
-    return json(200, { ok: true, refund: data });
+    await writeAudit(sb, {
+      organization_id: orgId,
+      actor_email: normEmail(user?.email),
+      actor_user_id: user?.id || null,
+      action: "stripe.refund",
+      entity: "orders",
+      entity_id: orderId,
+      summary: "Refund created and order marked as refunded",
+      before,
+      after: { status: "refunded" },
+      meta: {
+        refund_id: refund?.id || null,
+        payment_intent: pi,
+        stripe_session_id: order?.stripe_session_id || null,
+        amount_total_mxn: order?.amount_total_mxn || null,
+        role,
+      },
+      ip: req.headers.get("x-forwarded-for") || null,
+      user_agent: req.headers.get("user-agent") || null,
+    });
+
+    return json(200, { ok: true, refund });
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
   }
