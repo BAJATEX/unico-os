@@ -1,8 +1,10 @@
 // src/app/api/invite/route.js
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
+import { hasPerm } from "@/lib/authz";
 import { writeAudit } from "@/lib/auditServer";
 
 const json = (status, payload) => NextResponse.json(payload, { status });
@@ -13,14 +15,30 @@ function getBearerToken(req) {
   return m ? m[1] : "";
 }
 
+const normEmail = (s) => String(s || "").trim().toLowerCase();
+
 const isUuid = (s) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
     String(s || "").trim()
   );
 
-const normEmail = (s) => String(s || "").trim().toLowerCase();
+async function getMyRole(sb, orgId, user) {
+  const myEmail = normEmail(user?.email);
 
-const ALLOWED_ROLES = new Set(["owner", "admin", "ops", "sales", "marketing", "staff", "viewer"]);
+  const { data: mem } = await sb
+    .from("admin_users")
+    .select("role,is_active")
+    .eq("organization_id", orgId)
+    .eq("is_active", true)
+    .or(
+      `user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`
+    )
+    .limit(1)
+    .maybeSingle();
+
+  if (!mem?.is_active) return null;
+  return String(mem?.role || "").toLowerCase();
+}
 
 export async function POST(req) {
   try {
@@ -31,54 +49,44 @@ export async function POST(req) {
     if (authErr) return json(401, { ok: false, error: "No autorizado" });
 
     const body = await req.json().catch(() => ({}));
-    const orgId = String(body?.organization_id || "").trim();
+    const orgId = String(body?.org_id || "").trim();
     const email = normEmail(body?.email);
     const role = String(body?.role || "viewer").trim().toLowerCase();
 
-    if (!isUuid(orgId)) return json(400, { ok: false, error: "organization_id inválido." });
-    if (!email || !email.includes("@")) return json(400, { ok: false, error: "Email inválido." });
-    if (!ALLOWED_ROLES.has(role)) return json(400, { ok: false, error: "Rol inválido." });
+    if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido" });
+    if (!email) return json(400, { ok: false, error: "email inválido" });
 
-    // Only owner/admin can invite
-    const myEmail = normEmail(user?.email);
-    const { data: mem } = await sb
-      .from("admin_users")
-      .select("role,is_active")
-      .eq("organization_id", orgId)
-      .ilike("email", myEmail)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    const myRole = String(mem?.role || "").toLowerCase();
-    if (!mem || !["owner", "admin"].includes(myRole)) {
-      return json(403, { ok: false, error: "Permisos insuficientes." });
+    const myRole = await getMyRole(sb, orgId, user);
+    if (!myRole || !hasPerm(myRole, "users")) {
+      return json(403, { ok: false, error: "Permisos insuficientes" });
     }
 
-    const payload = {
-      organization_id: orgId,
-      email,
-      role,
-      is_active: true,
-      updated_at: new Date().toISOString(),
-    };
+    const now = new Date().toISOString();
+    const { data, error } = await sb
+      .from("admin_users")
+      .upsert(
+        [{ organization_id: orgId, email, role, is_active: true, updated_at: now }],
+        { onConflict: "organization_id,email" }
+      )
+      .select("id, organization_id, email, role, is_active")
+      .maybeSingle();
 
-    const { error } = await sb.from("admin_users").upsert(payload, { onConflict: "organization_id,email" });
     if (error) return json(400, { ok: false, error: error.message });
 
     await writeAudit(sb, {
       organization_id: orgId,
-      actor_email: myEmail,
+      actor_email: normEmail(user?.email),
       actor_user_id: user?.id || null,
       action: "admin_users.invite",
       entity: "admin_users",
       entity_id: email,
       summary: `Invited ${email} as ${role}`,
-      meta: { role_assigned: role },
+      meta: { role },
       ip: req.headers.get("x-forwarded-for") || null,
       user_agent: req.headers.get("user-agent") || null,
     });
 
-    return json(200, { ok: true, invited: { email, role } });
+    return json(200, { ok: true, user: data });
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
   }
