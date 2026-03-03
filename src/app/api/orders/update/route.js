@@ -16,21 +16,9 @@ function getBearerToken(req) {
 }
 
 const isUuid = (s) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    String(s || "").trim()
-  );
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "").trim());
 
 const normEmail = (s) => String(s || "").trim().toLowerCase();
-
-const ALLOWED_STATUS = new Set([
-  "pending",
-  "pending_payment",
-  "paid",
-  "payment_failed",
-  "fulfilled",
-  "cancelled",
-  "refunded",
-]);
 
 async function getMyRole(sb, orgId, user) {
   const myEmail = normEmail(user?.email);
@@ -40,15 +28,15 @@ async function getMyRole(sb, orgId, user) {
     .select("role,is_active")
     .eq("organization_id", orgId)
     .eq("is_active", true)
-    .or(
-      `user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`
-    )
+    .or(`user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`)
     .limit(1)
     .maybeSingle();
 
   if (!mem?.is_active) return null;
   return String(mem?.role || "").toLowerCase();
 }
+
+const allowedStatuses = new Set(["pending", "pending_payment", "paid", "payment_failed", "fulfilled", "cancelled"]);
 
 export async function POST(req) {
   try {
@@ -61,7 +49,7 @@ export async function POST(req) {
     const body = await req.json().catch(() => ({}));
     const orgId = String(body?.org_id || "").trim();
     const orderId = String(body?.order_id || "").trim();
-    const patch = body?.patch && typeof body.patch === "object" ? body.patch : {};
+    const patch = body?.patch || {};
 
     if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido" });
     if (!isUuid(orderId)) return json(400, { ok: false, error: "order_id inválido" });
@@ -69,44 +57,41 @@ export async function POST(req) {
     const role = await getMyRole(sb, orgId, user);
     if (!role || !hasPerm(role, "orders")) return json(403, { ok: false, error: "Permisos insuficientes" });
 
-    const newStatus = String(patch?.status || "").trim().toLowerCase();
-    if (!ALLOWED_STATUS.has(newStatus)) return json(400, { ok: false, error: "status inválido" });
+    const nextStatus = patch?.status ? String(patch.status).toLowerCase().trim() : null;
+    if (nextStatus && !allowedStatuses.has(nextStatus)) return json(400, { ok: false, error: "status inválido" });
 
-    const { data: before, error: eBefore } = await sb
+    const { data: beforeRow, error: beforeErr } = await sb
       .from("orders")
-      .select("id,status,organization_id,stripe_session_id,updated_at")
+      .select("id,status,metadata,updated_at")
       .eq("id", orderId)
       .eq("organization_id", orgId)
       .maybeSingle();
 
-    if (eBefore || !before) return json(404, { ok: false, error: "Pedido no encontrado" });
+    if (beforeErr) return json(500, { ok: false, error: "No se pudo leer el pedido" });
+    if (!beforeRow?.id) return json(404, { ok: false, error: "Pedido no encontrado" });
 
-    const { data: after, error: eUpd } = await sb
-      .from("orders")
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq("id", orderId)
-      .eq("organization_id", orgId)
-      .select("id,status,updated_at")
-      .maybeSingle();
+    const update = { updated_at: new Date().toISOString() };
+    if (nextStatus) update.status = nextStatus;
 
-    if (eUpd) return json(400, { ok: false, error: eUpd.message });
+    const { error: upErr } = await sb.from("orders").update(update).eq("id", orderId).eq("organization_id", orgId);
+    if (upErr) return json(500, { ok: false, error: "No se pudo actualizar el pedido" });
 
     await writeAudit(sb, {
       organization_id: orgId,
       actor_email: normEmail(user?.email),
       actor_user_id: user?.id || null,
-      action: "orders.update_status",
+      action: "orders.update",
       entity: "orders",
       entity_id: orderId,
-      summary: `Updated order status to ${newStatus}`,
-      before,
-      after,
-      meta: { stripe_session_id: before?.stripe_session_id || null, role },
+      summary: `Order updated (${nextStatus || "no status change"})`,
+      before: beforeRow,
+      after: { ...beforeRow, ...update },
+      meta: { patch: { status: nextStatus } },
       ip: req.headers.get("x-forwarded-for") || null,
       user_agent: req.headers.get("user-agent") || null,
     });
 
-    return json(200, { ok: true, order: after });
+    return json(200, { ok: true });
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
   }
