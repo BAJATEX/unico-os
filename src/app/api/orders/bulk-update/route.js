@@ -34,7 +34,20 @@ function clampIds(arr, max = 120) {
 async function getMyRole(sb, orgId, user) {
   const myEmail = normEmail(user?.email);
 
-  const { data: mem } = await sb
+  // Try org_id first
+  const q1 = await sb
+    .from("admin_users")
+    .select("role,is_active")
+    .eq("org_id", orgId)
+    .eq("is_active", true)
+    .or(`user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (!q1?.error && q1?.data?.is_active) return String(q1.data.role || "").toLowerCase();
+
+  // Fallback organization_id
+  const q2 = await sb
     .from("admin_users")
     .select("role,is_active")
     .eq("organization_id", orgId)
@@ -43,11 +56,11 @@ async function getMyRole(sb, orgId, user) {
     .limit(1)
     .maybeSingle();
 
-  if (!mem?.is_active) return null;
-  return String(mem?.role || "").toLowerCase();
+  if (!q2?.data?.is_active) return null;
+  return String(q2.data.role || "").toLowerCase();
 }
 
-const allowedStatuses = new Set(["pending", "pending_payment", "paid", "payment_failed", "fulfilled", "cancelled"]);
+const allowedStatuses = new Set(["pending", "pending_payment", "paid", "payment_failed", "fulfilled", "cancelled", "refunded"]);
 
 export async function POST(req) {
   try {
@@ -74,7 +87,12 @@ export async function POST(req) {
     const update = { updated_at: new Date().toISOString() };
     if (nextStatus) update.status = nextStatus;
 
-    const { error: upErr } = await sb.from("orders").update(update).eq("organization_id", orgId).in("id", ids);
+    const { error: upErr } = await sb
+      .from("orders")
+      .update(update)
+      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
+      .in("id", ids);
+
     if (upErr) return json(500, { ok: false, error: "No se pudo actualizar" });
 
     await writeAudit(sb, {
