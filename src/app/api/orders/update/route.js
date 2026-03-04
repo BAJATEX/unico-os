@@ -23,7 +23,20 @@ const normEmail = (s) => String(s || "").trim().toLowerCase();
 async function getMyRole(sb, orgId, user) {
   const myEmail = normEmail(user?.email);
 
-  const { data: mem } = await sb
+  // Try org_id first (new schema)
+  const q1 = await sb
+    .from("admin_users")
+    .select("role,is_active")
+    .eq("org_id", orgId)
+    .eq("is_active", true)
+    .or(`user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (!q1?.error && q1?.data?.is_active) return String(q1.data.role || "").toLowerCase();
+
+  // Fallback organization_id (older schema)
+  const q2 = await sb
     .from("admin_users")
     .select("role,is_active")
     .eq("organization_id", orgId)
@@ -32,11 +45,11 @@ async function getMyRole(sb, orgId, user) {
     .limit(1)
     .maybeSingle();
 
-  if (!mem?.is_active) return null;
-  return String(mem?.role || "").toLowerCase();
+  if (!q2?.data?.is_active) return null;
+  return String(q2.data.role || "").toLowerCase();
 }
 
-const allowedStatuses = new Set(["pending", "pending_payment", "paid", "payment_failed", "fulfilled", "cancelled"]);
+const allowedStatuses = new Set(["pending", "pending_payment", "paid", "payment_failed", "fulfilled", "cancelled", "refunded"]);
 
 export async function POST(req) {
   try {
@@ -62,9 +75,9 @@ export async function POST(req) {
 
     const { data: beforeRow, error: beforeErr } = await sb
       .from("orders")
-      .select("id,status,metadata,updated_at")
+      .select("id,status,metadata,updated_at,org_id,organization_id")
       .eq("id", orderId)
-      .eq("organization_id", orgId)
+      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
       .maybeSingle();
 
     if (beforeErr) return json(500, { ok: false, error: "No se pudo leer el pedido" });
@@ -73,7 +86,12 @@ export async function POST(req) {
     const update = { updated_at: new Date().toISOString() };
     if (nextStatus) update.status = nextStatus;
 
-    const { error: upErr } = await sb.from("orders").update(update).eq("id", orderId).eq("organization_id", orgId);
+    const { error: upErr } = await sb
+      .from("orders")
+      .update(update)
+      .eq("id", orderId)
+      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`);
+
     if (upErr) return json(500, { ok: false, error: "No se pudo actualizar el pedido" });
 
     await writeAudit(sb, {
