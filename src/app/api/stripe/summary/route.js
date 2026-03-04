@@ -70,4 +70,76 @@ async function stripeGet(path, params = {}) {
 
   const j = await res.json().catch(() => null);
   if (!res.ok) throw new Error(j?.error?.message || `Stripe error (${res.status})`);
-  return j
+  return j;
+}
+
+const centsToMXN = (cents) => (Number(cents || 0) / 100);
+
+export async function POST(req) {
+  try {
+    const sb = serverSupabase();
+    const token = getBearerToken(req);
+    const { user, error: authErr } = await requireUserFromToken(sb, token);
+    if (authErr) return json(401, { ok: false, error: "No autorizado" });
+
+    const body = await req.json().catch(() => ({}));
+    const orgId = String(body?.org_id || "").trim();
+    if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido" });
+
+    const role = await getMyRole(sb, orgId, user);
+    if (!role || !["owner", "admin", "finance"].includes(role)) {
+      return json(403, { ok: false, error: "Permisos insuficientes" });
+    }
+
+    // 30 días atrás
+    const now = Math.floor(Date.now() / 1000);
+    const since = now - 60 * 60 * 24 * 30;
+
+    // Balance (lo más parecido al dashboard)
+    const balance = await stripeGet("/v1/balance");
+
+    // Últimos payouts
+    const payouts = await stripeGet("/v1/payouts", { limit: 10 });
+
+    // Disputes y Refunds recientes
+    const disputes = await stripeGet("/v1/disputes", { limit: 10, "created[gte]": since });
+    const refunds = await stripeGet("/v1/refunds", { limit: 10, "created[gte]": since });
+
+    const sum = (arr, field) => (arr || []).reduce((a, x) => a + Number(x?.[field] || 0), 0);
+
+    const availableMXN = centsToMXN(sum(balance?.available || [], "amount"));
+    const pendingMXN = centsToMXN(sum(balance?.pending || [], "amount"));
+
+    const lastPayouts = (payouts?.data || []).map((p) => ({
+      id: p.id,
+      amount_mxn: centsToMXN(p.amount),
+      status: p.status,
+      arrival_date: p.arrival_date ? new Date(p.arrival_date * 1000).toISOString() : null,
+      created: p.created ? new Date(p.created * 1000).toISOString() : null,
+    }));
+
+    const disputesCount = (disputes?.data || []).length;
+    const disputesAmountMXN = centsToMXN(sum(disputes?.data || [], "amount"));
+
+    const refundsCount = (refunds?.data || []).length;
+    const refundsAmountMXN = centsToMXN(sum(refunds?.data || [], "amount"));
+
+    return json(200, {
+      ok: true,
+      balance: {
+        available_mxn: availableMXN,
+        pending_mxn: pendingMXN,
+      },
+      payouts: lastPayouts,
+      last_30_days: {
+        disputes_count: disputesCount,
+        disputes_amount_mxn: disputesAmountMXN,
+        refunds_count: refundsCount,
+        refunds_amount_mxn: refundsAmountMXN,
+      },
+      updated_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    return json(500, { ok: false, error: String(e?.message || e) });
+  }
+}
