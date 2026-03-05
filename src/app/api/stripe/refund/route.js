@@ -17,33 +17,35 @@ function getBearerToken(req) {
 
 const normEmail = (s) => String(s || "").trim().toLowerCase();
 
+const isUuid = (s) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "").trim());
+
 async function getMyRole(sb, orgId, user) {
   const myEmail = normEmail(user?.email);
+  const uid = user?.id || "00000000-0000-0000-0000-000000000000";
 
-  // Try org_id first
   const q1 = await sb
     .from("admin_users")
     .select("role,is_active")
     .eq("org_id", orgId)
     .eq("is_active", true)
-    .or(`user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`)
+    .or(`user_id.eq.${uid},email.ilike.${myEmail}`)
     .limit(1)
     .maybeSingle();
 
   if (!q1?.error && q1?.data?.is_active) return String(q1.data.role || "").toLowerCase();
 
-  // Fallback organization_id
   const q2 = await sb
     .from("admin_users")
     .select("role,is_active")
     .eq("organization_id", orgId)
     .eq("is_active", true)
-    .or(`user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`)
+    .or(`user_id.eq.${uid},email.ilike.${myEmail}`)
     .limit(1)
     .maybeSingle();
 
-  if (!q2?.data?.is_active) return null;
-  return String(q2.data.role || "").toLowerCase();
+  if (!q2?.error && q2?.data?.is_active) return String(q2.data.role || "").toLowerCase();
+  return null;
 }
 
 export async function POST(req) {
@@ -58,10 +60,11 @@ export async function POST(req) {
     if (authErr) return json(401, { ok: false, error: "No autorizado" });
 
     const body = await req.json().catch(() => ({}));
-    const orgId = String(body?.org_id || "").trim();
+    const orgId = String(body?.org_id || body?.organization_id || "").trim();
     const orderId = String(body?.order_id || "").trim();
 
-    if (!orgId || !orderId) return json(400, { ok: false, error: "org_id y order_id requeridos." });
+    if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido." });
+    if (!orderId) return json(400, { ok: false, error: "order_id requerido." });
 
     const role = await getMyRole(sb, orgId, user);
     if (!role || !hasPerm(role, "orders")) {
@@ -71,8 +74,8 @@ export async function POST(req) {
     const { data: order, error: oErr } = await sb
       .from("orders")
       .select("id, stripe_payment_intent_id, stripe_session_id, status, amount_total_mxn, org_id, organization_id")
-      .eq("id", orderId)
       .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
+      .eq("id", orderId)
       .maybeSingle();
 
     if (oErr || !order) return json(404, { ok: false, error: "Pedido no encontrado." });
@@ -96,11 +99,12 @@ export async function POST(req) {
     if (!res.ok) return json(400, { ok: false, error: refund?.error?.message || "Stripe refund error." });
 
     const before = { status: order?.status || null };
+
     await sb
       .from("orders")
       .update({ status: "refunded", updated_at: new Date().toISOString() })
-      .eq("id", orderId)
-      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`);
+      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
+      .eq("id", orderId);
 
     await writeAudit(sb, {
       organization_id: orgId,
