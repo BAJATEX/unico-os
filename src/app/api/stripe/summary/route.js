@@ -1,175 +1,222 @@
-// src/app/api/stripe/summary/route.js
+import { NextResponse } from "next/server";
+import { serverSupabase } from "@/lib/serverSupabase";
+import { requireUserFromToken } from "@/lib/authServer";
+import { hasPerm } from "@/lib/authz";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
-import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
-import { hasPerm } from "@/lib/authz";
-import { writeAudit } from "@/lib/auditServer";
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || "";
+const USD_MXN = Number(process.env.USD_MXN || "17.0"); // fallback razonable
 
-const json = (status, payload) => NextResponse.json(payload, { status });
+const json = (data, status = 200) =>
+  NextResponse.json(data, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    },
+  });
 
-function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : "";
-}
+const num = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
 
-const isUuid = (s) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "").trim());
-
-const normEmail = (s) => String(s || "").trim().toLowerCase();
-
-async function getMyRole(sb, orgId, user) {
-  const myEmail = normEmail(user?.email);
-  const uid = user?.id || "00000000-0000-0000-0000-000000000000";
-
-  // org_id
-  const q1 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("org_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${uid},email.ilike.${myEmail}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!q1?.error && q1?.data?.is_active) return String(q1.data.role || "").toLowerCase();
-
-  // organization_id fallback
-  const q2 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("organization_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${uid},email.ilike.${myEmail}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!q2?.error && q2?.data?.is_active) return String(q2.data.role || "").toLowerCase();
-  return null;
-}
-
-const STRIPE_API = "https://api.stripe.com/v1";
-
-function stripeKey() {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) throw new Error("Falta STRIPE_SECRET_KEY");
-  return key;
-}
-
-function fxToMXN(currency) {
-  const c = String(currency || "mxn").toLowerCase();
+const fxToMXN = (currency) => {
+  const c = String(currency || "").toLowerCase();
   if (c === "mxn") return 1;
-  if (c === "usd") return Math.max(0.0001, Number(process.env.FX_USD_TO_MXN || 18));
-  const envKey = `FX_${c.toUpperCase()}_TO_MXN`;
-  const fx = Number(process.env[envKey] || NaN);
-  return Number.isFinite(fx) && fx > 0 ? fx : 1;
-}
+  if (c === "usd") return USD_MXN;
+  // si Stripe devuelve otra moneda, no inventamos tasas:
+  // devolvemos 1 y marcamos moneda en la respuesta.
+  return 1;
+};
 
-async function stripeGET(path, query = {}) {
-  const url = new URL(`${STRIPE_API}${path}`);
-  for (const [k, v] of Object.entries(query || {})) {
-    if (v === undefined || v === null) continue;
-    if (Array.isArray(v)) for (const it of v) url.searchParams.append(k, String(it));
-    else url.searchParams.set(k, String(v));
-  }
+const stripeFetch = async (path, params = {}) => {
+  if (!STRIPE_KEY) throw new Error("STRIPE_SECRET_KEY no configurada en UnicOs");
+  const url = new URL(`https://api.stripe.com${path}`);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === "") return;
+    url.searchParams.set(k, String(v));
+  });
 
   const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: { Authorization: `Bearer ${stripeKey()}` },
+    headers: {
+      Authorization: `Bearer ${STRIPE_KEY}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    cache: "no-store",
   });
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(String(data?.error?.message || `Stripe error (${res.status})`));
-  return data;
-}
-
-function sumBalanceArr(arr) {
-  let totalMXN = 0;
-  for (const it of Array.isArray(arr) ? arr : []) {
-    const amount = Number(it?.amount || 0) || 0; // cents
-    const currency = String(it?.currency || "mxn").toLowerCase();
-    totalMXN += (amount / 100) * fxToMXN(currency);
+  if (!res.ok) {
+    const msg = data?.error?.message || data?.message || `Stripe error (${res.status})`;
+    throw new Error(msg);
   }
-  return totalMXN;
-}
+  return data;
+};
 
-export async function POST(req) {
-  try {
-    const sb = serverSupabase();
-    const token = getBearerToken(req);
+const getSessionCharge = async (sessionId) => {
+  // 1) Checkout Session -> Payment Intent (expand)
+  const sess = await stripeFetch(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+    "expand[]": "payment_intent",
+  });
 
-    const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr) return json(401, { ok: false, error: "No autorizado" });
+  const pi = sess?.payment_intent;
+  const currency = String(sess?.currency || pi?.currency || "mxn").toLowerCase();
+  const fx = fxToMXN(currency);
 
-    const body = await req.json().catch(() => ({}));
-    const orgId = String(body?.org_id || body?.organization_id || "").trim();
-    if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido" });
+  const paidAmount = num(sess?.amount_total ?? 0);
+  const paidAmountMXN = Math.round((paidAmount / 100) * fx * 100);
 
-    const role = await getMyRole(sb, orgId, user);
-    if (!role || !hasPerm(role, "dashboard")) return json(403, { ok: false, error: "Permisos insuficientes" });
-
-    // Balance actual
-    const bal = await stripeGET("/balance");
-
-    const available_mxn = sumBalanceArr(bal?.available);
-    const pending_mxn = sumBalanceArr(bal?.pending);
-
-    // Ventana 30 días
-    const now = Math.floor(Date.now() / 1000);
-    const since = now - 30 * 24 * 60 * 60;
-
-    // Disputes (30d)
-    const disputes = await stripeGET("/disputes", { limit: 100, "created[gte]": since });
-
-    // Refunds (30d)
-    const refunds = await stripeGET("/refunds", { limit: 100, "created[gte]": since });
-
-    // Payouts recientes (para “dashboard feel”)
-    const payouts = await stripeGET("/payouts", { limit: 20 });
-
-    const payload = {
-      ok: true,
-      updated_at: new Date().toISOString(),
-      balance: {
-        available_mxn,
-        pending_mxn,
-      },
-      last_30_days: {
-        disputes_count: Array.isArray(disputes?.data) ? disputes.data.length : 0,
-        refunds_count: Array.isArray(refunds?.data) ? refunds.data.length : 0,
-      },
-      payouts: (Array.isArray(payouts?.data) ? payouts.data : []).slice(0, 10).map((p) => ({
-        id: p?.id || null,
-        amount_mxn: ((Number(p?.amount || 0) || 0) / 100) * fxToMXN(p?.currency),
-        currency: String(p?.currency || "").toLowerCase() || null,
-        status: p?.status || null,
-        arrival_date: p?.arrival_date ? new Date(p.arrival_date * 1000).toISOString() : null,
-        created: p?.created ? new Date(p.created * 1000).toISOString() : null,
-      })),
+  const chargeId = pi?.latest_charge || null;
+  if (!chargeId) {
+    return {
+      session_id: sessionId,
+      currency,
+      amount_paid_mxn: paidAmountMXN,
+      fee_mxn: 0,
+      net_mxn: 0,
+      refunded_mxn: 0,
+      disputed: false,
+      charge_id: null,
     };
+  }
 
-    await writeAudit(sb, {
-      organization_id: orgId,
-      actor_email: normEmail(user?.email),
-      actor_user_id: user?.id || null,
-      action: "stripe.summary",
-      entity: "stripe",
-      entity_id: orgId,
-      summary: "Stripe dashboard summary fetched",
-      meta: {
-        available_mxn,
-        pending_mxn,
-        disputes_30d: payload.last_30_days.disputes_count,
-        refunds_30d: payload.last_30_days.refunds_count,
+  // 2) Charge -> expand balance_transaction + refunds
+  const ch = await stripeFetch(`/v1/charges/${encodeURIComponent(chargeId)}`, {
+    "expand[]": "balance_transaction",
+  });
+
+  const bt = ch?.balance_transaction || null;
+  const fee = num(bt?.fee ?? 0); // en centavos de la moneda
+  const net = num(bt?.net ?? 0);
+
+  const feeMXN = Math.round((fee / 100) * fx * 100);
+  const netMXN = Math.round((net / 100) * fx * 100);
+
+  const refunded = num(ch?.amount_refunded ?? 0);
+  const refundedMXN = Math.round((refunded / 100) * fx * 100);
+
+  const disputed = !!ch?.disputed;
+
+  return {
+    session_id: sessionId,
+    currency,
+    amount_paid_mxn: paidAmountMXN,
+    fee_mxn: feeMXN,
+    net_mxn: netMXN,
+    refunded_mxn: refundedMXN,
+    disputed,
+    charge_id: chargeId,
+  };
+};
+
+export async function GET(req) {
+  try {
+    const auth = req.headers.get("authorization") || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    const user = await requireUserFromToken(token);
+
+    const { searchParams } = new URL(req.url);
+    const orgId = searchParams.get("org_id") || "";
+    const days = Math.min(120, Math.max(7, Number(searchParams.get("days") || "30")));
+
+    if (!orgId) return json({ ok: false, error: "Falta org_id" }, 400);
+
+    const sb = serverSupabase();
+    const { data: adminRow, error: adminErr } = await sb
+      .from("admin_users")
+      .select("id, role, is_active, organization_id")
+      .eq("organization_id", orgId)
+      .eq("is_active", true)
+      .or(`user_id.eq.${user.id},email.ilike.${user.email || ""}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (adminErr || !adminRow) return json({ ok: false, error: "No autorizado" }, 403);
+    if (!hasPerm(adminRow.role, "view_finance")) return json({ ok: false, error: "Sin permisos" }, 403);
+
+    // Orders reales (tu tienda)
+    const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+
+    const { data: orders, error: ordersErr } = await sb
+      .from("orders")
+      .select("id, organization_id, status, amount_total_mxn, stripe_session_id, created_at")
+      .eq("organization_id", orgId)
+      .in("status", ["paid", "fulfilled"])
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(120);
+
+    if (ordersErr) throw new Error(ordersErr.message);
+
+    const sessionIds = Array.from(
+      new Set((orders || []).map((o) => o.stripe_session_id).filter(Boolean))
+    ).slice(0, 60);
+
+    // Stripe global (lo que ves en dashboard Stripe)
+    const [balance, payouts] = await Promise.all([
+      stripeFetch("/v1/balance"),
+      stripeFetch("/v1/payouts", { limit: "10" }),
+    ]);
+
+    // Stripe por sesiones (tu tienda)
+    const sessions = [];
+    for (const sid of sessionIds) {
+      try {
+        sessions.push(await getSessionCharge(sid));
+      } catch (e) {
+        sessions.push({
+          session_id: sid,
+          currency: "unknown",
+          amount_paid_mxn: 0,
+          fee_mxn: 0,
+          net_mxn: 0,
+          refunded_mxn: 0,
+          disputed: false,
+          charge_id: null,
+          error: String(e?.message || e),
+        });
+      }
+    }
+
+    const grossOrdersMXN = (orders || []).reduce((a, o) => a + num(o.amount_total_mxn), 0);
+    const stripeFeeMXN = sessions.reduce((a, s) => a + num(s.fee_mxn), 0) / 100;
+    const stripeNetMXN = sessions.reduce((a, s) => a + num(s.net_mxn), 0) / 100;
+    const refundedMXN = sessions.reduce((a, s) => a + num(s.refunded_mxn), 0) / 100;
+    const disputeCount = sessions.filter((s) => !!s.disputed).length;
+
+    // balance: viene en centavos por moneda
+    const available = balance?.available || [];
+    const pending = balance?.pending || [];
+
+    return json({
+      ok: true,
+      scope: {
+        org_id: orgId,
+        days,
+        orders_count: (orders || []).length,
+        stripe_sessions_count: sessionIds.length,
       },
-      ip: req.headers.get("x-forwarded-for") || null,
-      user_agent: req.headers.get("user-agent") || null,
+      kpi: {
+        // “Tu tienda”: basado en orders + sesiones reales
+        gross_orders_mxn: grossOrdersMXN,
+        stripe_fee_mxn: Math.round(stripeFeeMXN * 100) / 100,
+        stripe_net_mxn: Math.round(stripeNetMXN * 100) / 100,
+        refunded_mxn: Math.round(refundedMXN * 100) / 100,
+        disputes: disputeCount,
+      },
+      stripe_dashboard: {
+        balance_available: available, // array por moneda (como Stripe)
+        balance_pending: pending,
+        payouts: payouts?.data || [],
+      },
+      sessions: sessions.slice(0, 30), // detalle útil sin saturar
+      updated_at: new Date().toISOString(),
     });
-
-    return json(200, payload);
   } catch (e) {
-    return json(500, { ok: false, error: String(e?.message || e) });
+    return json({ ok: false, error: String(e?.message || e) }, 500);
   }
 }
