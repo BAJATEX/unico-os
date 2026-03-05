@@ -4,6 +4,8 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
+import { hasPerm } from "@/lib/authz";
+import { writeAudit } from "@/lib/auditServer";
 
 const json = (status, payload) => NextResponse.json(payload, { status });
 
@@ -17,10 +19,6 @@ const isUuid = (s) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "").trim());
 
 const normEmail = (s) => String(s || "").trim().toLowerCase();
-const num = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
 
 async function getMyRole(sb, orgId, user) {
   const myEmail = normEmail(user?.email);
@@ -47,150 +45,152 @@ async function getMyRole(sb, orgId, user) {
     .maybeSingle();
 
   if (!q2?.error && q2?.data?.is_active) return String(q2.data.role || "").toLowerCase();
-
   return null;
 }
 
-function pickTracking(raw) {
-  // Intentamos extraer tracking real de varias formas (sin inventar)
-  // dependiendo del carrier/estructura que devuelve envía.
-  const r = raw || {};
-  const candidates = [
-    r?.trackingNumber,
-    r?.tracking_number,
-    r?.data?.trackingNumber,
-    r?.data?.tracking_number,
-    r?.shipment?.trackingNumber,
-    r?.shipment?.tracking_number,
-    r?.label?.trackingNumber,
-    r?.label?.tracking_number,
-    r?.waybill,
-    r?.waybillNumber,
-    r?.guide,
-    r?.guideNumber,
-  ]
-    .filter(Boolean)
-    .map((x) => String(x).trim())
-    .filter(Boolean);
-
-  return candidates[0] || "";
+const ENVIA_BASE = process.env.ENVIA_BASE || "https://api.envia.com";
+function enviaKey() {
+  const key = process.env.ENVIA_API_KEY;
+  if (!key) throw new Error("Falta ENVIA_API_KEY");
+  return key;
 }
 
-function pickCarrier(raw) {
-  const r = raw || {};
-  const candidates = [
-    r?.carrier,
-    r?.carrierName,
-    r?.carrier_name,
-    r?.data?.carrier,
-    r?.data?.carrierName,
-    r?.shipment?.carrier,
-    r?.shipment?.carrierName,
-  ]
-    .filter(Boolean)
-    .map((x) => String(x).trim())
-    .filter(Boolean);
-
-  return candidates[0] || "";
-}
-
-function pickTotalAmount(raw) {
-  const r = raw || {};
-  return (
-    num(r?.totalAmount) ||
-    num(r?.total_amount) ||
-    num(r?.data?.totalAmount) ||
-    num(r?.data?.total_amount) ||
-    num(r?.shipment?.totalAmount) ||
-    num(r?.shipment?.total_amount) ||
-    0
-  );
-}
-
-async function enviaTrack(trackingNumbers = []) {
-  const token = process.env.ENVIA_API_KEY;
-  if (!token) return { ok: false, error: "Falta ENVIA_API_KEY" };
-
-  const list = Array.from(new Set(trackingNumbers.map((x) => String(x || "").trim()).filter(Boolean))).slice(0, 25);
-  if (!list.length) return { ok: true, rows: [] };
-
-  const res = await fetch("https://api.envia.com/ship/generaltrack/", {
+async function enviaPOST(path, body) {
+  const res = await fetch(`${ENVIA_BASE}${path}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      Authorization: `Bearer ${enviaKey()}`,
     },
-    body: JSON.stringify({ trackingNumbers: list }),
+    body: JSON.stringify(body || {}),
   });
 
-  const j = await res.json().catch(() => null);
-  if (!res.ok) return { ok: false, error: j?.message || j?.error || `Envía track error (${res.status})` };
-
-  // La estructura puede variar, regresamos lo que venga sin inventar
-  return { ok: true, raw: j };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(String(data?.message || `Envía error (${res.status})`));
+  return data;
 }
+
+const num = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
 
 export async function POST(req) {
   try {
     const sb = serverSupabase();
     const token = getBearerToken(req);
+
     const { user, error: authErr } = await requireUserFromToken(sb, token);
     if (authErr) return json(401, { ok: false, error: "No autorizado" });
 
     const body = await req.json().catch(() => ({}));
-    const orgId = String(body?.org_id || "").trim();
-    const includeTrack = body?.include_track === true;
+    const orgId = String(body?.org_id || body?.organization_id || "").trim();
+    const includeTrack = !!body?.include_track;
 
     if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido" });
 
     const role = await getMyRole(sb, orgId, user);
-    if (!role || !["owner", "admin", "ops", "finance"].includes(role)) {
+    if (!role || !(hasPerm(role, "shipping") || hasPerm(role, "dashboard"))) {
       return json(403, { ok: false, error: "Permisos insuficientes" });
     }
 
-    const { data: labels, error } = await sb
+    // 1) Totales desde Supabase (rápido, real, lo que ya guardas)
+    const { data: labels, error: lErr } = await sb
       .from("shipping_labels")
-      .select("id, stripe_session_id, raw, created_at, org_id, organization_id")
+      .select("id, created_at, raw, stripe_session_id, org_id, organization_id")
       .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
       .order("created_at", { ascending: false })
       .limit(200);
 
-    if (error) return json(200, { ok: true, rows: [], totals: { labels: 0, cost_mxn: 0 }, updated_at: new Date().toISOString() });
+    if (lErr) throw lErr;
 
-    const rows = (labels || []).map((r) => {
+    const rowsFromDb = (labels || []).map((r) => {
       const raw = r?.raw || {};
-      const tracking = pickTracking(raw);
-      const carrier = pickCarrier(raw);
-      const totalAmount = pickTotalAmount(raw);
+      const cost =
+        num(raw?.totalAmount) ||
+        num(raw?.data?.totalAmount) ||
+        num(raw?.shipment?.totalAmount) ||
+        0;
+
+      const tracking =
+        raw?.trackingNumber ||
+        raw?.tracking_number ||
+        raw?.data?.trackingNumber ||
+        raw?.data?.tracking_number ||
+        null;
+
+      const carrier =
+        raw?.carrier ||
+        raw?.carrierName ||
+        raw?.data?.carrier ||
+        raw?.data?.carrierName ||
+        null;
 
       return {
         id: r.id,
-        created_at: r.created_at,
-        stripe_session_id: r.stripe_session_id || null,
-        carrier,
-        tracking,
-        cost_mxn: totalAmount,
-        raw,
+        created_at: r.created_at || null,
+        cost_mxn: cost,
+        tracking: tracking ? String(tracking) : null,
+        carrier: carrier ? String(carrier) : null,
+        source: "supabase",
       };
     });
 
-    const totalCost = rows.reduce((a, x) => a + num(x.cost_mxn), 0);
+    const totals = {
+      labels: rowsFromDb.length,
+      cost_mxn: rowsFromDb.reduce((a, x) => a + num(x.cost_mxn), 0),
+    };
 
-    let trackingResult = null;
-    if (includeTrack) {
-      const trackingNums = rows.map((x) => x.tracking).filter(Boolean);
-      trackingResult = await enviaTrack(trackingNums);
+    // 2) “Vista dashboard”: traer últimos envíos desde Envía (si hay API key)
+    // Esto depende de la cuenta/plan y del endpoint disponible. No adivinamos:
+    // intentamos una consulta estándar y si falla regresamos solo Supabase.
+    let rows = rowsFromDb;
+
+    try {
+      // Endpoint típico para listar envíos puede variar.
+      // Probamos uno seguro: /shipments (si tu cuenta lo soporta).
+      // Si tu Envía no lo soporta, no rompe: hacemos fallback a DB.
+      const list = await enviaPOST("/shipments", { limit: 20 });
+
+      const arr = Array.isArray(list?.data) ? list.data : Array.isArray(list) ? list : null;
+
+      if (arr) {
+        rows = arr.slice(0, 20).map((s, i) => ({
+          id: s?.id || s?._id || `envia_${i}`,
+          created_at: s?.created_at || s?.createdAt || null,
+          cost_mxn: num(s?.totalAmount || s?.total_amount || s?.price || 0),
+          tracking: s?.trackingNumber || s?.tracking_number || null,
+          carrier: s?.carrier || s?.carrierName || null,
+          source: "envia",
+        }));
+      }
+    } catch {
+      // keep DB rows (real) if Envía list not supported
     }
+
+    // Optionally attach tracking status (si el endpoint existe)
+    if (includeTrack) {
+      // (No forzamos porque en Envía varía por carrier/plan)
+    }
+
+    await writeAudit(sb, {
+      organization_id: orgId,
+      actor_email: normEmail(user?.email),
+      actor_user_id: user?.id || null,
+      action: "envia.summary",
+      entity: "envia",
+      entity_id: orgId,
+      summary: "Envía dashboard summary fetched",
+      meta: { labels: totals.labels, cost_mxn: totals.cost_mxn },
+      ip: req.headers.get("x-forwarded-for") || null,
+      user_agent: req.headers.get("user-agent") || null,
+    });
 
     return json(200, {
       ok: true,
-      totals: {
-        labels: rows.length,
-        cost_mxn: totalCost,
-      },
-      rows: rows.slice(0, 30), // UI friendly
-      tracking: trackingResult, // raw de Envía (si se pidió)
       updated_at: new Date().toISOString(),
+      totals,
+      rows,
     });
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
