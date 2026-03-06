@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/serverSupabase";
 import { requireUserFromToken } from "@/lib/authServer";
-import { hasPerm } from "@/lib/authz";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,17 +19,52 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const normEmail = (s) => String(s || "").trim().toLowerCase();
+
 const requireBearer = (req) => {
   const auth = req.headers.get("authorization") || "";
   return auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
 };
 
-// lectura real desde raw (tu operación)
+async function getMyRole(sb, orgId, user) {
+  const email = normEmail(user?.email);
+  const uid = user?.id || "00000000-0000-0000-0000-000000000000";
+
+  const q1 = await sb
+    .from("admin_users")
+    .select("role,is_active")
+    .eq("organization_id", orgId)
+    .eq("is_active", true)
+    .or(`user_id.eq.${uid},email.ilike.${email}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (!q1.error && q1.data?.is_active) return String(q1.data.role || "").toLowerCase();
+
+  const q2 = await sb
+    .from("admin_users")
+    .select("role,is_active")
+    .eq("org_id", orgId)
+    .eq("is_active", true)
+    .or(`user_id.eq.${uid},email.ilike.${email}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (!q2.error && q2.data?.is_active) return String(q2.data.role || "").toLowerCase();
+
+  return null;
+}
+
+function canViewFinance(role) {
+  return ["owner", "admin", "marketing"].includes(String(role || "").toLowerCase());
+}
+
 const pickTotalFromRaw = (raw) =>
   num(raw?.totalAmount) ||
   num(raw?.data?.totalAmount) ||
   num(raw?.shipment?.totalAmount) ||
   num(raw?.data?.shipment?.totalAmount) ||
+  num(raw?.amount) ||
   0;
 
 const pickTrackingFromRaw = (raw) =>
@@ -63,21 +97,13 @@ export async function GET(req) {
     if (!orgId) return json({ ok: false, error: "Falta org_id" }, 400);
 
     const sb = serverSupabase();
-    const { data: adminRow } = await sb
-      .from("admin_users")
-      .select("id, role, is_active, organization_id, user_id, email")
-      .eq("organization_id", orgId)
-      .eq("is_active", true)
-      .or(`user_id.eq.${user.id},email.ilike.${user.email || ""}`)
-      .limit(1)
-      .maybeSingle();
+    const role = await getMyRole(sb, orgId, user);
 
-    if (!adminRow) return json({ ok: false, error: "No autorizado" }, 403);
-    if (!hasPerm(adminRow.role, "view_finance")) return json({ ok: false, error: "Sin permisos" }, 403);
+    if (!role) return json({ ok: false, error: "No autorizado" }, 403);
+    if (!canViewFinance(role)) return json({ ok: false, error: "Sin permisos" }, 403);
 
     const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
 
-    // soporta org_id o organization_id (porque en tu ecosistema ya viste ambos)
     const { data: labels, error } = await sb
       .from("shipping_labels")
       .select("id, org_id, organization_id, stripe_session_id, raw, created_at")
@@ -90,12 +116,11 @@ export async function GET(req) {
 
     const list = (labels || []).map((r) => {
       const raw = r?.raw || {};
-      const total = pickTotalFromRaw(raw);
       return {
         id: r.id,
         stripe_session_id: r.stripe_session_id || null,
         created_at: r.created_at,
-        total_amount_mxn: total,
+        total_amount_mxn: pickTotalFromRaw(raw),
         tracking: pickTrackingFromRaw(raw) ? String(pickTrackingFromRaw(raw)) : null,
         carrier: pickCarrierFromRaw(raw) ? String(pickCarrierFromRaw(raw)) : null,
       };
@@ -105,8 +130,14 @@ export async function GET(req) {
 
     return json({
       ok: true,
-      scope: { org_id: orgId, days, labels_count: list.length },
-      kpi: { envia_cost_mxn: Math.round(totalMXN * 100) / 100 },
+      scope: {
+        org_id: orgId,
+        days,
+        labels_count: list.length,
+      },
+      kpi: {
+        envia_cost_mxn: Math.round(totalMXN * 100) / 100,
+      },
       labels: list.slice(0, 80),
       updated_at: new Date().toISOString(),
     });
