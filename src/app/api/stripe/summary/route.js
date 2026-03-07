@@ -1,9 +1,11 @@
+// src/app/api/stripe/summary/route.js
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/serverSupabase";
 import { requireUserFromToken } from "@/lib/authServer";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+import { getMyRoleForOrg, applyOrgFilter } from "@/lib/dbScope";
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || "";
 const USD_MXN = Number(process.env.USD_MXN || process.env.FX_USD_TO_MXN || "18");
@@ -22,7 +24,14 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-const normEmail = (s) => String(s || "").trim().toLowerCase();
+const requireBearer = (req) => {
+  const auth = req.headers.get("authorization") || "";
+  return auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+};
+
+function canViewFinance(role) {
+  return ["owner", "admin", "marketing"].includes(String(role || "").toLowerCase());
+}
 
 const fxToMXN = (currency) => {
   const c = String(currency || "").toLowerCase();
@@ -32,9 +41,10 @@ const fxToMXN = (currency) => {
 };
 
 const stripeFetch = async (path, params = {}) => {
-  if (!STRIPE_KEY) throw new Error("STRIPE_SECRET_KEY no configurada en UnicOs");
+  if (!STRIPE_KEY) throw new Error("STRIPE_SECRET_KEY no configurada en UnicOs.");
 
   const url = new URL(`https://api.stripe.com${path}`);
+
   Object.entries(params).forEach(([k, v]) => {
     if (v === undefined || v === null || v === "") return;
     if (Array.isArray(v)) {
@@ -53,50 +63,13 @@ const stripeFetch = async (path, params = {}) => {
   });
 
   const data = await res.json().catch(() => ({}));
+
   if (!res.ok) {
-    const msg = data?.error?.message || data?.message || `Stripe error (${res.status})`;
-    throw new Error(msg);
+    throw new Error(data?.error?.message || data?.message || `Stripe error (${res.status})`);
   }
+
   return data;
 };
-
-const requireBearer = (req) => {
-  const auth = req.headers.get("authorization") || "";
-  return auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-};
-
-async function getMyRole(sb, orgId, user) {
-  const email = normEmail(user?.email);
-  const uid = user?.id || "00000000-0000-0000-0000-000000000000";
-
-  const q1 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("organization_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${uid},email.ilike.${email}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!q1.error && q1.data?.is_active) return String(q1.data.role || "").toLowerCase();
-
-  const q2 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("org_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${uid},email.ilike.${email}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!q2.error && q2.data?.is_active) return String(q2.data.role || "").toLowerCase();
-
-  return null;
-}
-
-function canViewFinance(role) {
-  return ["owner", "admin", "marketing"].includes(String(role || "").toLowerCase());
-}
 
 async function getSessionChargeMetrics(sessionId) {
   const session = await stripeFetch(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
@@ -134,29 +107,36 @@ export async function GET(req) {
     const orgId = String(searchParams.get("org_id") || "").trim();
     const days = Math.min(180, Math.max(7, Number(searchParams.get("days") || "30")));
 
-    if (!orgId) return json({ ok: false, error: "Falta org_id" }, 400);
+    if (!orgId) {
+      return json({ ok: false, error: "Falta org_id." }, 400);
+    }
 
     const sb = serverSupabase();
-    const role = await getMyRole(sb, orgId, user);
+    const role = await getMyRoleForOrg(sb, orgId, user);
 
-    if (!role) return json({ ok: false, error: "No autorizado" }, 403);
-    if (!canViewFinance(role)) return json({ ok: false, error: "Sin permisos" }, 403);
+    if (!role) return json({ ok: false, error: "No autorizado." }, 403);
+    if (!canViewFinance(role)) return json({ ok: false, error: "Sin permisos." }, 403);
 
     const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
 
-    const { data: orders, error: ordersErr } = await sb
+    const q = sb
       .from("orders")
-      .select("id, amount_total_mxn, stripe_session_id, status, created_at")
-      .eq("organization_id", orgId)
+      .select("id, amount_total_mxn, stripe_session_id, status, created_at, shipping_total_mxn, envia_cost_mxn")
       .in("status", ["paid", "fulfilled"])
       .gte("created_at", since)
       .order("created_at", { ascending: false })
       .limit(250);
 
+    const { data: orders, error: ordersErr } = await applyOrgFilter(q, orgId);
+
     if (ordersErr) throw new Error(ordersErr.message);
 
     const sessionIds = Array.from(
-      new Set((orders || []).map((o) => String(o?.stripe_session_id || "").trim()).filter(Boolean))
+      new Set(
+        (orders || [])
+          .map((o) => String(o?.stripe_session_id || "").trim())
+          .filter(Boolean)
+      )
     ).slice(0, 120);
 
     const sessionMetrics = [];
@@ -178,10 +158,21 @@ export async function GET(req) {
     }
 
     const grossOrdersMXN = (orders || []).reduce((a, o) => a + num(o.amount_total_mxn), 0);
+    const enviaCostMXN = (orders || []).reduce((a, o) => {
+      const real = num(o.envia_cost_mxn);
+      if (real > 0) return a + real;
+      return a;
+    }, 0);
+
     const stripeFeeMXN = sessionMetrics.reduce((a, x) => a + num(x.fee_mxn), 0);
     const stripeNetMXN = sessionMetrics.reduce((a, x) => a + num(x.net_mxn), 0);
     const refundedMXN = sessionMetrics.reduce((a, x) => a + num(x.refunded_mxn), 0);
     const disputes = sessionMetrics.reduce((a, x) => a + (x.disputed ? 1 : 0), 0);
+
+    const visibleProfitMXN = Math.max(
+      0,
+      Math.round((grossOrdersMXN - stripeFeeMXN - enviaCostMXN) * 0.7 * 100) / 100
+    );
 
     const [balance, payouts, charges] = await Promise.all([
       stripeFetch("/v1/balance"),
@@ -198,8 +189,10 @@ export async function GET(req) {
         stripe_sessions_count: sessionIds.length,
       },
       kpi: {
-        gross_orders_mxn: Math.round(grossOrdersMXN * 100) / 100,
+        sales_mxn: Math.round(grossOrdersMXN * 100) / 100,
         stripe_fee_mxn: Math.round(stripeFeeMXN * 100) / 100,
+        envia_cost_mxn: Math.round(enviaCostMXN * 100) / 100,
+        visible_profit_mxn: visibleProfitMXN,
         stripe_net_mxn: Math.round(stripeNetMXN * 100) / 100,
         refunded_mxn: Math.round(refundedMXN * 100) / 100,
         disputes,
