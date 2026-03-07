@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
 import { hasPerm } from "@/lib/authz";
 import { writeAudit } from "@/lib/auditServer";
+import { isUuid, normEmail, getMyRoleForOrg, applyOrgFilter } from "@/lib/dbScope";
 
 const json = (status, payload) => NextResponse.json(payload, { status });
 
@@ -13,39 +14,6 @@ function getBearerToken(req) {
   const h = req.headers.get("authorization") || "";
   const m = h.match(/^Bearer\s+(.+)$/i);
   return m ? m[1] : "";
-}
-
-const normEmail = (s) => String(s || "").trim().toLowerCase();
-
-const isUuid = (s) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "").trim());
-
-async function getMyRole(sb, orgId, user) {
-  const myEmail = normEmail(user?.email);
-  const uid = user?.id || "00000000-0000-0000-0000-000000000000";
-
-  const q1 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("org_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${uid},email.ilike.${myEmail}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!q1?.error && q1?.data?.is_active) return String(q1.data.role || "").toLowerCase();
-
-  const q2 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("organization_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${uid},email.ilike.${myEmail}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!q2?.error && q2?.data?.is_active) return String(q2.data.role || "").toLowerCase();
-  return null;
 }
 
 export async function POST(req) {
@@ -66,17 +34,17 @@ export async function POST(req) {
     if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido." });
     if (!orderId) return json(400, { ok: false, error: "order_id requerido." });
 
-    const role = await getMyRole(sb, orgId, user);
+    const role = await getMyRoleForOrg(sb, orgId, user);
     if (!role || !hasPerm(role, "orders")) {
       return json(403, { ok: false, error: "Permisos insuficientes." });
     }
 
-    const { data: order, error: oErr } = await sb
+    const readQ = sb
       .from("orders")
       .select("id, stripe_payment_intent_id, stripe_session_id, status, amount_total_mxn, org_id, organization_id")
-      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
-      .eq("id", orderId)
-      .maybeSingle();
+      .eq("id", orderId);
+
+    const { data: order, error: oErr } = await applyOrgFilter(readQ, orgId).maybeSingle();
 
     if (oErr || !order) return json(404, { ok: false, error: "Pedido no encontrado." });
 
@@ -96,15 +64,18 @@ export async function POST(req) {
     });
 
     const refund = await res.json().catch(() => null);
-    if (!res.ok) return json(400, { ok: false, error: refund?.error?.message || "Stripe refund error." });
+    if (!res.ok) {
+      return json(400, { ok: false, error: refund?.error?.message || "Stripe refund error." });
+    }
 
     const before = { status: order?.status || null };
 
-    await sb
+    const updateQ = sb
       .from("orders")
       .update({ status: "refunded", updated_at: new Date().toISOString() })
-      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
       .eq("id", orderId);
+
+    await applyOrgFilter(updateQ, orgId);
 
     await writeAudit(sb, {
       organization_id: orgId,
