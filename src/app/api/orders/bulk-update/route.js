@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
 import { hasPerm } from "@/lib/authz";
 import { writeAudit } from "@/lib/auditServer";
+import { isUuid, normEmail, getMyRoleForOrg, applyOrgFilter } from "@/lib/dbScope";
 
 const json = (status, payload) => NextResponse.json(payload, { status });
 
@@ -14,11 +15,6 @@ function getBearerToken(req) {
   const m = h.match(/^Bearer\s+(.+)$/i);
   return m ? m[1] : "";
 }
-
-const isUuid = (s) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "").trim());
-
-const normEmail = (s) => String(s || "").trim().toLowerCase();
 
 function clampIds(arr, max = 120) {
   const out = [];
@@ -31,36 +27,15 @@ function clampIds(arr, max = 120) {
   return out;
 }
 
-async function getMyRole(sb, orgId, user) {
-  const myEmail = normEmail(user?.email);
-
-  // Try org_id first
-  const q1 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("org_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!q1?.error && q1?.data?.is_active) return String(q1.data.role || "").toLowerCase();
-
-  // Fallback organization_id
-  const q2 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("organization_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${user?.id || "00000000-0000-0000-0000-000000000000"},email.ilike.${myEmail}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!q2?.data?.is_active) return null;
-  return String(q2.data.role || "").toLowerCase();
-}
-
-const allowedStatuses = new Set(["pending", "pending_payment", "paid", "payment_failed", "fulfilled", "cancelled", "refunded"]);
+const allowedStatuses = new Set([
+  "pending",
+  "pending_payment",
+  "paid",
+  "payment_failed",
+  "fulfilled",
+  "cancelled",
+  "refunded",
+]);
 
 export async function POST(req) {
   try {
@@ -71,27 +46,28 @@ export async function POST(req) {
     if (authErr) return json(401, { ok: false, error: "No autorizado" });
 
     const body = await req.json().catch(() => ({}));
-    const orgId = String(body?.org_id || "").trim();
+    const orgId = String(body?.org_id || body?.organization_id || "").trim();
     const ids = clampIds(body?.order_ids, 200);
     const patch = body?.patch || {};
 
     if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido" });
     if (!ids.length) return json(400, { ok: false, error: "order_ids vacío" });
 
-    const role = await getMyRole(sb, orgId, user);
-    if (!role || !hasPerm(role, "orders")) return json(403, { ok: false, error: "Permisos insuficientes" });
+    const role = await getMyRoleForOrg(sb, orgId, user);
+    if (!role || !hasPerm(role, "orders")) {
+      return json(403, { ok: false, error: "Permisos insuficientes" });
+    }
 
     const nextStatus = patch?.status ? String(patch.status).toLowerCase().trim() : null;
-    if (nextStatus && !allowedStatuses.has(nextStatus)) return json(400, { ok: false, error: "status inválido" });
+    if (nextStatus && !allowedStatuses.has(nextStatus)) {
+      return json(400, { ok: false, error: "status inválido" });
+    }
 
     const update = { updated_at: new Date().toISOString() };
     if (nextStatus) update.status = nextStatus;
 
-    const { error: upErr } = await sb
-      .from("orders")
-      .update(update)
-      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
-      .in("id", ids);
+    const q = sb.from("orders").update(update).in("id", ids);
+    const { error: upErr } = await applyOrgFilter(q, orgId);
 
     if (upErr) return json(500, { ok: false, error: "No se pudo actualizar" });
 
