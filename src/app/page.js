@@ -16,11 +16,8 @@ import {
   Search,
   Settings,
   Shield,
-  Sparkles,
   Truck,
   Wallet,
-  X,
-  Check,
   BarChart3,
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
@@ -218,7 +215,6 @@ function HelpTip({ title, text }) {
     </div>
   );
 }
-
 function TopShell({ orgName, onRefresh, refreshing, onOpenSettings, currentTab, setCurrentTab }) {
   const tabs = [
     { key: "dashboard", label: "Dashboard", icon: <BarChart3 size={16} /> },
@@ -246,7 +242,8 @@ function TopShell({ orgName, onRefresh, refreshing, onOpenSettings, currentTab, 
             <p className="truncate text-sm text-slate-500">{orgName || "Sin organización activa"}</p>
           </div>
         </div>
-          <div className="flex flex-wrap items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-2xl bg-slate-50 p-1 ring-1 ring-slate-200">
             {tabs.map((tab) => (
               <button
@@ -438,7 +435,7 @@ function FinanceSummary({ token, orgId, role }) {
 
   const kpi = state.data?.kpi || {};
 
-  return (
+return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
       <MetricCard
         icon={<PiggyBank size={20} />}
@@ -457,7 +454,22 @@ function FinanceSummary({ token, orgId, role }) {
       <MetricCard
         icon={<Truck size={20} />}
         label="Costo envíos"
-        value={money(kpi.envia_cost_mxn)}function DashboardView({ token, orgId, role }) {
+        value={money(kpi.envia_cost_mxn)}
+        sub="Costo operativo"
+        tone="slate"
+      />
+      <MetricCard
+        icon={<Wallet size={20} />}
+        label="Ganancia"
+        value={money(kpi.visible_profit_mxn)}
+        sub="Lectura simple del panel"
+        tone="emerald"
+      />
+    </div>
+  );
+}
+
+function DashboardView({ token, orgId, role }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [orders, setOrders] = useState([]);
@@ -576,8 +588,7 @@ function FinanceSummary({ token, orgId, role }) {
           tone="amber"
         />
       </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+<div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <Card className="xl:col-span-2 p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -661,6 +672,7 @@ function FinanceSummary({ token, orgId, role }) {
     </div>
   );
 }
+
 function ProductsView({ orgId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -701,8 +713,7 @@ function ProductsView({ orgId }) {
       [r?.name, r?.sku, r?.section_id, r?.sub_section].some((x) => safeStr(x).toLowerCase().includes(term))
     );
   }, [rows, q]);
-
-  if (loading) return <LoadingShell label="Leyendo productos reales..." />;
+if (loading) return <LoadingShell label="Leyendo productos reales..." />;
 
   if (error) {
     return (
@@ -858,7 +869,9 @@ function SettingsShortcut() {
       </div>
     </div>
   );
-}export default function UnicOsHomePage() {
+}
+
+export default function UnicOsHomePage() {
   const mounted = useMounted();
 
   const [checking, setChecking] = useState(true);
@@ -872,7 +885,7 @@ function SettingsShortcut() {
   const [refreshing, setRefreshing] = useState(false);
   const [currentTab, setCurrentTab] = useState("dashboard");
 
-  const loadSessionAndOrg = useCallback(async () => {
+const loadSessionAndOrg = useCallback(async () => {
     if (!supabase) {
       setGlobalError("Faltan NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.");
       setChecking(false);
@@ -1044,17 +1057,78 @@ function SettingsShortcut() {
       setGlobalError(String(e?.message || e));
     }
   }, []);
-  
-        sub="Costo operativo"
-        tone="slate"
-      />
-      <MetricCard
-        icon={<Wallet size={20} />}
-        label="Ganancia"
-        value={money(kpi.visible_profit_mxn)}
-        sub="Lectura simple del panel"
-        tone="emerald"
-      />
-    </div>
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      await loadSessionAndOrg();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadSessionAndOrg]);
+
+  const openSettings = useCallback(() => {
+    setCurrentTab("settings");
+  }, []);
+
+  if (!mounted) return null;
+
+  if (!SUPABASE_READY) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-4 py-8">
+        <div className="mx-auto max-w-3xl">
+          <EmptyState
+            icon={<Shield size={20} />}
+            title="Falta configuración pública de Supabase"
+            text="Agrega NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY para que UnicOs pueda operar."
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-4 py-6 md:py-8">
+        <div className="mx-auto max-w-7xl">
+          <LoadingShell label="Validando acceso, organización y permisos..." />
+        </div>
+      </div>
+    );
+  }
+
+  if (!accessToken || !activeOrgId) {
+    return <LoginCard onLogin={handleLogin} loading={authLoading} error={globalError} />;
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50 text-slate-900">
+      <div className="mx-auto max-w-7xl px-4 py-4 md:px-6 md:py-6 space-y-4">
+        <TopShell
+          orgName={activeOrgName}
+          onRefresh={handleRefresh}
+          refreshing={refreshing}
+          onOpenSettings={openSettings}
+          currentTab={currentTab}
+          setCurrentTab={setCurrentTab}
+        />
+
+        <HeaderBar orgName={activeOrgName} role={role} email={sessionEmail} onLogout={handleLogout} />
+
+        {globalError ? (
+          <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200">
+            {globalError}
+          </div>
+        ) : null}
+
+        {currentTab === "dashboard" ? (
+          <DashboardView token={accessToken} orgId={activeOrgId} role={role} />
+        ) : null}
+
+        {currentTab === "products" ? <ProductsView orgId={activeOrgId} /> : null}
+
+        {currentTab === "settings" ? <SettingsShortcut /> : null}
+      </div>
+    </main>
   );
 }
