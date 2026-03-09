@@ -1,7 +1,5 @@
 /** @type {import('next').NextConfig} */
 
-// UnicOs — Next config (seguro + Lighthouse-friendly)
-
 const FALLBACK_SUPABASE_HOST = "lpbzndnavkbpxwnlbqgb.supabase.co";
 const FALLBACK_SCORESTORE_HOST = "scorestore.netlify.app";
 
@@ -34,7 +32,6 @@ const csp = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  // UnicOs muestra imágenes desde Supabase y (para Score Store) rutas tipo assets/... que viven en scorestore.netlify.app
   `img-src 'self' data: blob: https://${SUPABASE_HOST} https://${SCORESTORE_HOST}`,
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self' 'unsafe-inline'",
@@ -53,6 +50,11 @@ const securityHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" },
 ];
 
+const htmlHeaders = [
+  ...securityHeaders,
+  { key: "Content-Type", value: "text/html; charset=utf-8" },
+];
+
 const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
@@ -63,7 +65,37 @@ const nextConfig = {
     ],
   },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/", headers: htmlHeaders },
+      { source: "/auth/callback", headers: htmlHeaders },
+      { source: "/scorestore-settings", headers: htmlHeaders },
+      { source: "/:path*", headers: securityHeaders },
+      {
+        source: "/manifest.json",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+          { key: "Content-Type", value: "application/manifest+json; charset=utf-8" },
+        ],
+      },
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, proxy-revalidate" },
+          { key: "Pragma", value: "no-cache" },
+          { key: "Expires", value: "0" },
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+        ],
+      },
+      {
+        source: "/offline.html",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, proxy-revalidate" },
+          { key: "Pragma", value: "no-cache" },
+          { key: "Expires", value: "0" },
+          { key: "Content-Type", value: "text/html; charset=utf-8" },
+        ],
+      },
+    ];
   },
 };
 
