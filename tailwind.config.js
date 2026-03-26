@@ -1,6 +1,5 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  // AQUÍ ESTABA EL ERROR: Faltaba "src/" al principio
   content: [
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
@@ -13,14 +12,14 @@ module.exports = {
         unico: {
           50: "#fff1f1",
           100: "#ffdfdf",
-          200: '#fecdd3', // Agregué intermedios para suavidad si los usas
+          200: '#fecdd3', 
           300: '#fda4af',
           400: '#fb7185',
           500: '#f43f5e',
-          600: "#E10600", // Tu rojo principal
+          600: "#E10600", 
           700: "#c50500",
           800: '#9f1239',
-          900: "#0f0f10", // Tu negro casi puro
+          900: "#0f0f10", 
           950: '#4c0519',
         },
         score: {
@@ -30,5 +29,5 @@ module.exports = {
       }
     }
   },
-  plugins: []
+  plugins: [],
 };
