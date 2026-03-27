@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, AlertTriangle, RefreshCcw, Copy, ExternalLink } from "lucide-react";
+import { CheckCircle2, AlertTriangle, RefreshCcw, Copy } from "lucide-react";
 
 const Row = ({ ok, label }) => (
   <div className="flex items-center justify-between gap-3 py-3 border-b border-white/5">
@@ -29,7 +29,7 @@ export default function SetupWizard() {
       const j = await res.json();
       setEnv(j?.env || null);
     } catch (e) {
-      console.error(e);
+      console.error("Health check error:", e);
     } finally {
       setLoading(false);
     }
@@ -49,8 +49,8 @@ export default function SetupWizard() {
             <img src="/logo-unico.png" alt="UnicOs" className="w-full h-full object-contain rounded-xl" />
           </div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-sky-400">Configuración de entorno</p>
-            <h1 className="text-2xl font-black text-white">Vercel Deployment Wizard</h1>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-sky-400">Migración Vercel</p>
+            <h1 className="text-2xl font-black text-white">Configuración UnicOs</h1>
           </div>
         </div>
 
@@ -58,48 +58,38 @@ export default function SetupWizard() {
           {loading ? (
             <div className="flex items-center gap-3 text-slate-400 py-10 justify-center">
               <RefreshCcw className="animate-spin" size={20} />
-              <span className="font-bold">Verificando variables...</span>
+              <span className="font-bold">Verificando entorno...</span>
             </div>
           ) : env ? (
             <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
-              <Row ok={env.NEXT_PUBLIC_SUPABASE_URL} label="NEXT_PUBLIC_SUPABASE_URL" />
-              <Row ok={env.NEXT_PUBLIC_SUPABASE_ANON_KEY} label="NEXT_PUBLIC_SUPABASE_ANON_KEY" />
-              <Row ok={env.SUPABASE_SERVICE_ROLE_KEY} label="SUPABASE_SERVICE_ROLE_KEY" />
+              <Row ok={env.NEXT_PUBLIC_SUPABASE_URL} label="SUPABASE_URL (Client)" />
+              <Row ok={env.SUPABASE_SERVICE_ROLE_KEY} label="SUPABASE_SERVICE_ROLE" />
               <Row ok={env.STRIPE_SECRET_KEY} label="STRIPE_SECRET_KEY" />
-              <Row ok={env.GEMINI_API_KEY} label="GEMINI_API_KEY" />
+              <Row ok={env.GEMINI_API_KEY} label="GEMINI_IA_KEY" />
+              <Row ok={env.FX_USD_TO_MXN} label="FX_USD_TO_MXN (Exchange)" />
+              <Row ok={env.ENVIA_API_KEY} label="ENVIA_API_KEY" />
             </div>
           ) : (
-            <p className="text-rose-400 font-bold text-center py-4">Error al conectar con la API de salud.</p>
+            <p className="text-rose-400 font-bold text-center py-4">Error: No se detecta la API de salud.</p>
           )}
         </div>
 
         <div className="mt-8">
-          <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Variables requeridas en Vercel Dashboard:</p>
-          <div className="grid gap-2">
-            {[
-              "NEXT_PUBLIC_SUPABASE_URL",
-              "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-              "SUPABASE_SERVICE_ROLE_KEY",
-              "STRIPE_SECRET_KEY",
-              "GEMINI_API_KEY",
-              "NEXT_PUBLIC_SITE_URL"
-            ].map((v) => (
+          <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Variables para Vercel Dashboard:</p>
+          <div className="grid grid-cols-2 gap-2">
+            {["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "STRIPE_SECRET_KEY", "GEMINI_API_KEY", "FX_USD_TO_MXN"].map((v) => (
               <button
-                key={v}
-                onClick={() => copy(v)}
-                className="w-full text-left px-4 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-white font-bold text-sm flex items-center justify-between transition-all"
+                key={v} onClick={() => copy(v)}
+                className="text-left px-3 py-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-white font-bold text-[10px] flex items-center justify-between transition-all"
               >
-                {v} <Copy size={14} className="opacity-40" />
+                {v} <Copy size={12} className="opacity-40" />
               </button>
             ))}
           </div>
         </div>
 
-        <button 
-          onClick={load}
-          className="mt-8 w-full unicos-btn py-4 bg-sky-500 text-white font-black text-sm uppercase tracking-widest rounded-2xl shadow-lg shadow-sky-500/20"
-        >
-          Re-verificar conexión
+        <button onClick={load} className="mt-8 w-full unicos-btn py-4 bg-sky-500 text-white font-black text-sm uppercase tracking-widest rounded-2xl shadow-lg shadow-sky-500/20">
+          Re-verificar sistema
         </button>
       </div>
     </div>
