@@ -21,15 +21,7 @@ const safeNum = (v, d = 0) => {
   return Number.isFinite(n) ? n : d;
 };
 
-const safeStr = (v, d = "") => (typeof v === "string" ? v : v == null ? d : String(v));
-
-function isUuid(v) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    safeStr(v).trim()
-  );
-}
-
-// Helper para llamadas a Stripe sin SDK
+// Helper para llamadas directas a Stripe (Optimizado)
 async function fetchStripe(path) {
   if (!STRIPE_KEY) return null;
   try {
@@ -40,22 +32,19 @@ async function fetchStripe(path) {
       },
     });
     return r.ok ? await r.json() : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 export async function GET(req) {
   try {
-    // 1. Auth & Params
     const { user, token, error: authError } = await requireUserFromToken(req);
     if (authError || !user) return json({ ok: false, error: "Unauthorized" }, 401);
 
     const { searchParams } = new URL(req.url);
     const orgId = searchParams.get("orgId");
     const days = safeNum(searchParams.get("days"), 30);
-
-    if (!isUuid(orgId)) return json({ ok: false, error: "Invalid orgId" }, 400);
+    
+    if (!orgId) return json({ ok: false, error: "Missing orgId" }, 400);
 
     const dateLimit = new Date();
     dateLimit.setDate(dateLimit.getDate() - days);
@@ -63,19 +52,10 @@ export async function GET(req) {
 
     const supabase = serverSupabase(token);
 
-    // 2. EJECUCIÓN EN PARALELO (Optimización Crítica)
-    // Lanzamos las 5 peticiones simultáneamente
+    // 🚀 EJECUCIÓN PARALELA: Reducción de latencia en Vercel
     const [ordersRes, labelsRes, stripeBalance, stripePayouts, stripeCharges] = await Promise.all([
-      supabase
-        .from("orders")
-        .select("id, total_amount, stripe_session_id, created_at")
-        .eq("organization_id", orgId)
-        .gte("created_at", dateIso),
-      supabase
-        .from("shipping_labels")
-        .select("id, total_amount_mxn, raw, created_at")
-        .eq("organization_id", orgId)
-        .gte("created_at", dateIso),
+      supabase.from("orders").select("*").eq("organization_id", orgId).gte("created_at", dateIso),
+      supabase.from("shipping_labels").select("*").eq("organization_id", orgId).gte("created_at", dateIso),
       fetchStripe("balance"),
       fetchStripe("payouts?limit=10"),
       fetchStripe("charges?limit=50"),
@@ -84,72 +64,64 @@ export async function GET(req) {
     const orderRows = ordersRes.data || [];
     const labelRows = labelsRes.data || [];
 
-    // 3. Cálculos de Ventas y Logística
+    // Lógica de Negocio UnicOs
     let salesMXN = 0;
-    orderRows.forEach((o) => {
+    let shippingCollectedMXN = 0;
+    orderRows.forEach(o => {
       salesMXN += safeNum(o.total_amount);
+      shippingCollectedMXN += safeNum(o.shipping_amount || 0);
     });
 
     let enviaCostMXN = 0;
-    labelRows.forEach((l) => {
-      enviaCostMXN += safeNum(l.total_amount_mxn);
-    });
+    labelRows.forEach(l => { enviaCostMXN += safeNum(l.total_amount_mxn); });
 
-    // 4. Cálculos de Stripe (Fees y Disputas)
     let stripeFeeMXN = 0;
     let refundedMXN = 0;
+    let stripeNetMXN = 0;
     let disputes = 0;
 
     const chargesData = stripeCharges?.data || [];
-    chargesData.forEach((c) => {
-      // Si el fee viene en USD (común en cuentas internacionales), convertimos usando el FX del .env
-      const fee = safeNum(c.application_fee_amount || 0) / 100;
+    chargesData.forEach(c => {
+      const fee = (safeNum(c.application_fee_amount) || (c.amount * 0.039 + 3)) / 100;
+      const amount = safeNum(c.amount) / 100;
+      
       if (c.currency === "usd") {
         stripeFeeMXN += fee * USD_MXN;
+        stripeNetMXN += (amount - fee) * USD_MXN;
       } else {
         stripeFeeMXN += fee;
+        stripeNetMXN += (amount - fee);
       }
-
       if (c.refunded) refundedMXN += safeNum(c.amount_refunded) / 100;
       if (c.disputed) disputes++;
     });
 
-    // 5. Utilidad Visible (Ventas - Envíos - Fees Stripe)
     const visibleProfitMXN = Math.round((salesMXN - enviaCostMXN - stripeFeeMXN) * 100) / 100;
 
     return json({
       ok: true,
+      scope: { orgId, days, orders_count: orderRows.length },
       kpi: {
         sales_mxn: Math.round(salesMXN * 100) / 100,
-        envia_cost_mxn: Math.round(enviaCostMXN * 100) / 100,
+        shipping_collected_mxn: Math.round(shippingCollectedMXN * 100) / 100,
         stripe_fee_mxn: Math.round(stripeFeeMXN * 100) / 100,
+        envia_cost_mxn: Math.round(enviaCostMXN * 100) / 100,
         visible_profit_mxn: visibleProfitMXN,
+        stripe_net_mxn: Math.round(stripeNetMXN * 100) / 100,
         refunded_mxn: Math.round(refundedMXN * 100) / 100,
-        disputes,
-        orders_count: orderRows.length
+        disputes
       },
       stripe_dashboard: {
         balance_available: stripeBalance?.available || [],
         balance_pending: stripeBalance?.pending || [],
         payouts: stripePayouts?.data || [],
-        charges: chargesData.map((c) => ({
-          id: c.id,
-          status: c.status,
-          paid: c.paid,
-          amount: c.amount,
-          created: c.created,
-          currency: c.currency
-        })),
-      },
-      meta: {
-        orgId,
-        days,
-        fx_used: USD_MXN
+        charges: chargesData.map(c => ({
+          id: c.id, status: c.status, paid: c.paid, amount: c.amount, created: c.created
+        }))
       }
     });
-
   } catch (error) {
-    console.error("Critical Route Error:", error);
+    console.error("Route Error:", error);
     return json({ ok: false, error: "Internal Server Error" }, 500);
   }
 }
