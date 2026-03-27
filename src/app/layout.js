@@ -1,21 +1,16 @@
 import "./globals.css";
-import SwRegister from "./sw-register";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-export const viewport = {
-  themeColor: "#0f0f10",
-  width: "device-width",
-  initialScale: 1,
-  viewportFit: "cover",
-};
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  (process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "https://unicos-admin.vercel.app");
 
 export const metadata = {
-  // Migrado a Vercel dinámica o fallback
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://unicos-admin.vercel.app"),
+  metadataBase: new URL(siteUrl),
   title: "UnicOs Admin",
-  description: "Centro de control de UnicOs para administrar operaciones, contenido y tiendas conectadas.",
+  description:
+    "Centro de control de UnicOs para administrar operaciones, contenido y tiendas conectadas.",
   manifest: "/manifest.json",
   icons: {
     icon: [
@@ -34,13 +29,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es-MX">
-      <head>
-        <meta charSet="utf-8" />
-      </head>
-      <body>
-        <SwRegister />
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
