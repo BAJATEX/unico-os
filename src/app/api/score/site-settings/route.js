@@ -3,8 +3,9 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
+import { getMyRoleForOrg, isUuid } from "@/lib/dbScope";
 
-const SCORE_ORG_ID = "1f3b9980-a1c5-4557-b4eb-a75bb9a8aaa6";
+const DEFAULT_SCORE_ORG_ID = "1f3b9980-a1c5-4557-b4eb-a75bb9a8aaa6";
 
 const noStoreHeaders = {
   "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
@@ -16,94 +17,121 @@ const json = (data, status = 200) =>
   NextResponse.json(data, { status, headers: noStoreHeaders });
 
 const safeStr = (v, d = "") => (typeof v === "string" ? v : v == null ? d : String(v));
-const normEmail = (s) => safeStr(s).trim().toLowerCase();
 
-function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
+const getBearerToken = (req) => {
+  const h = req.headers.get("authorization");
+  if (!h) return "";
+  const m = h.match(/^Bearer\s+(.*)$/i);
   return m ? m[1] : "";
-}
+};
 
-function isUuid(v) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    safeStr(v).trim()
-  );
-}
+const getOrigin = (req) =>
+  req.headers.get("origin") ||
+  req.headers.get("Origin") ||
+  "*";
 
-async function getMyRoleForOrg(sb, orgId, user) {
-  const email = normEmail(user?.email);
-  const uid = safeStr(user?.id);
+const getDefaults = () => ({
+  ok: true,
+  store: { name: "SCORE STORE", currency: "MXN", locale: "es-MX" },
+  hero_title: null,
+  hero_image: null,
+  promo_active: false,
+  promo_text: "",
+  pixel_id: "",
+  maintenance_mode: false,
+  season_key: "default",
+  theme: {
+    accent: "#e10600",
+    accent2: "#111111",
+    particles: true,
+  },
+  home: {
+    footer_note: "",
+    shipping_note: "",
+    returns_note: "",
+    support_hours: "",
+  },
+  socials: {
+    facebook: process.env.SOCIAL_FACEBOOK || "https://www.facebook.com/uniforme.unico/",
+    instagram: process.env.SOCIAL_INSTAGRAM || "https://www.instagram.com/uniformes.unico",
+    youtube: process.env.SOCIAL_YOUTUBE || "https://youtu.be/F4lw1EcehIA?si=jFBT9skFLs566g8N",
+    tiktok: process.env.SOCIAL_TIKTOK || "",
+  },
+  contact: {
+    email: process.env.SUPPORT_EMAIL || process.env.FACTORY_EMAIL || "ventas.unicotextil@gmail.com",
+    phone: process.env.SUPPORT_PHONE || "6642368701",
+    whatsapp_e164: process.env.SUPPORT_WHATSAPP_E164 || "5216642368701",
+    whatsapp_display: process.env.SUPPORT_WHATSAPP_DISPLAY || "664 236 8701",
+  },
+  updated_at: null,
+});
 
-  const q = await sb
-    .from("admin_users")
-    .select("role,is_active,organization_id,org_id,email,user_id")
-    .eq("is_active", true)
-    .or(`organization_id.eq.${orgId},org_id.eq.${orgId}`)
-    .or(`email.ilike.${email},user_id.eq.${uid}`)
-    .limit(20);
+const resolveOrgId = async (sb, explicitOrgId = "") => {
+  const envId = explicitOrgId || process.env.SCORE_ORG_ID || process.env.DEFAULT_ORG_ID;
+  if (envId && isUuid(envId)) return String(envId).trim();
 
-  if (!q.error && Array.isArray(q.data) && q.data.length) {
-    const exact =
-      q.data.find((r) => safeStr(r?.organization_id || r?.org_id) === safeStr(orgId)) || q.data[0];
-    return safeStr(exact?.role).toLowerCase();
-  }
+  let orgId = DEFAULT_SCORE_ORG_ID;
 
-  return null;
-}
+  try {
+    const { data: byId } = await sb
+      .from("organizations")
+      .select("id")
+      .eq("id", orgId)
+      .limit(1)
+      .maybeSingle();
 
-function canRead(role) {
-  return ["owner", "admin", "marketing", "support", "operations"].includes(
-    safeStr(role).toLowerCase()
-  );
-}
+    if (byId?.id) return orgId;
 
-function canWrite(role) {
-  return ["owner", "admin", "marketing"].includes(safeStr(role).toLowerCase());
-}
+    const { data: byName } = await sb
+      .from("organizations")
+      .select("id")
+      .ilike("name", "%score%")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
-function defaults() {
+    if (byName?.id) orgId = byName.id;
+  } catch {}
+
+  return orgId;
+};
+
+const shapeSiteSettings = (row) => {
+  const d = getDefaults();
+
+  if (!row || typeof row !== "object") return d;
+
+  const theme = row.theme && typeof row.theme === "object" ? row.theme : {};
+  const home = row.home && typeof row.home === "object" ? row.home : {};
+  const socials = row.socials && typeof row.socials === "object" ? row.socials : {};
+
   return {
-    organization_id: SCORE_ORG_ID,
-    hero_title: "",
-    hero_image: "",
-    promo_active: false,
-    promo_text: "",
-    pixel_id: "",
-    maintenance_mode: false,
-    season_key: "default",
-    theme: {
-      accent: "#e10600",
-      accent2: "#111111",
-      particles: true,
+    ...d,
+    hero_title: safeStr(row.hero_title) || d.hero_title,
+    hero_image: safeStr(row.hero_image) || d.hero_image,
+    promo_active: !!row.promo_active,
+    promo_text: safeStr(row.promo_text),
+    pixel_id: safeStr(row.pixel_id),
+    maintenance_mode: !!row.maintenance_mode,
+    season_key: safeStr(row.season_key || "default"),
+    theme: { ...d.theme, ...theme },
+    home: { ...d.home, ...home },
+    socials: { ...d.socials, ...socials },
+    contact: {
+      ...d.contact,
+      email: safeStr(row.contact_email) || d.contact.email,
+      phone: safeStr(row.contact_phone) || d.contact.phone,
+      whatsapp_e164: safeStr(row.whatsapp_e164) || d.contact.whatsapp_e164,
+      whatsapp_display: safeStr(row.whatsapp_display) || d.contact.whatsapp_display,
     },
-    home: {
-      footer_note: "",
-      shipping_note: "",
-      returns_note: "",
-      support_hours: "",
-    },
-    socials: {
-      facebook: "",
-      instagram: "",
-      youtube: "",
-      tiktok: "",
-    },
-    contact_email: "",
-    contact_phone: "",
-    whatsapp_e164: "",
-    whatsapp_display: "",
-    updated_at: null,
+    updated_at: row.updated_at || null,
   };
-}
+};
 
-async function readSiteSettings(sb, orgId) {
-  const base = defaults();
-
-  const first = await sb
+const fetchPublicSettings = async (sb, orgId) => {
+  const { data, error } = await sb
     .from("site_settings")
     .select(`
-      organization_id,
-      org_id,
       hero_title,
       hero_image,
       promo_active,
@@ -114,12 +142,11 @@ async function readSiteSettings(sb, orgId) {
       theme,
       home,
       socials,
+      updated_at,
       contact_email,
       contact_phone,
       whatsapp_e164,
-      whatsapp_display,
-      updated_at,
-      created_at
+      whatsapp_display
     `)
     .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
     .order("updated_at", { ascending: false })
@@ -127,137 +154,100 @@ async function readSiteSettings(sb, orgId) {
     .limit(1)
     .maybeSingle();
 
-  if (first.error) {
-    throw new Error(first.error.message || "No se pudo leer site_settings.");
-  }
-
-  const row = first.data || null;
-  if (!row) return base;
-
-  return {
-    ...base,
-    organization_id: safeStr(row.organization_id || row.org_id || orgId),
-    hero_title: safeStr(row.hero_title),
-    hero_image: safeStr(row.hero_image),
-    promo_active: !!row.promo_active,
-    promo_text: safeStr(row.promo_text),
-    pixel_id: safeStr(row.pixel_id),
-    maintenance_mode: !!row.maintenance_mode,
-    season_key: safeStr(row.season_key || "default"),
-    theme: row.theme && typeof row.theme === "object" ? row.theme : base.theme,
-    home: row.home && typeof row.home === "object" ? row.home : base.home,
-    socials: row.socials && typeof row.socials === "object" ? row.socials : base.socials,
-    contact_email: safeStr(row.contact_email),
-    contact_phone: safeStr(row.contact_phone),
-    whatsapp_e164: safeStr(row.whatsapp_e164),
-    whatsapp_display: safeStr(row.whatsapp_display),
-    updated_at: row.updated_at || null,
-  };
-}
-
-async function writeSiteSettings(sb, orgId, patch) {
-  const cleanTheme = patch?.theme && typeof patch.theme === "object" ? patch.theme : {};
-  const cleanHome = patch?.home && typeof patch.home === "object" ? patch.home : {};
-  const cleanSocials = patch?.socials && typeof patch.socials === "object" ? patch.socials : {};
-
-  const payload = {
-    organization_id: orgId,
-    hero_title: safeStr(patch?.hero_title),
-    hero_image: safeStr(patch?.hero_image),
-    promo_active: !!patch?.promo_active,
-    promo_text: safeStr(patch?.promo_text),
-    pixel_id: safeStr(patch?.pixel_id),
-    maintenance_mode: !!patch?.maintenance_mode,
-    season_key: safeStr(patch?.season_key || "default"),
-    theme: cleanTheme,
-    home: cleanHome,
-    socials: cleanSocials,
-    contact_email: safeStr(patch?.contact_email),
-    contact_phone: safeStr(patch?.contact_phone),
-    whatsapp_e164: safeStr(patch?.whatsapp_e164),
-    whatsapp_display: safeStr(patch?.whatsapp_display),
-    updated_at: new Date().toISOString(),
-  };
-
-  const q1 = await sb.from("site_settings").upsert(payload, { onConflict: "organization_id" });
-  if (!q1.error) return true;
-
-  const payloadOrgId = {
-    ...payload,
-    org_id: orgId,
-  };
-
-  const q2 = await sb.from("site_settings").upsert(payloadOrgId, { onConflict: "org_id" });
-  if (!q2.error) return true;
-
-  throw new Error(q2.error?.message || q1.error?.message || "No se pudo guardar site_settings.");
-}
+  if (error || !data) return shapeSiteSettings(null);
+  return shapeSiteSettings(data);
+};
 
 export async function GET(req) {
   try {
+    const origin = getOrigin(req);
     const sb = serverSupabase();
-    const token = getBearerToken(req);
-    const { user, error } = await requireUserFromToken(sb, token);
+    const orgId = await resolveOrgId(sb, new URL(req.url).searchParams.get("org_id") || "");
 
-    if (error || !user) {
-      return json({ ok: false, error: "No autorizado." }, 401);
-    }
-
-    const { searchParams } = new URL(req.url);
-    const orgId = safeStr(searchParams.get("org_id") || SCORE_ORG_ID).trim();
-
-    if (!isUuid(orgId)) {
-      return json({ ok: false, error: "org_id inválido." }, 400);
-    }
-
-    const role = await getMyRoleForOrg(sb, orgId, user);
-    if (!role || !canRead(role)) {
-      return json({ ok: false, error: "Sin permisos." }, 403);
-    }
-
-    const data = await readSiteSettings(sb, orgId);
-
-    return json({
-      ok: true,
-      role,
-      data,
-    });
-  } catch (e) {
-    return json({ ok: false, error: String(e?.message || e) }, 500);
+    const data = await fetchPublicSettings(sb, orgId);
+    return json({ ...data, ok: true, org_id: orgId }, 200);
+  } catch (error) {
+    return json(
+      {
+        ok: false,
+        error: String(error?.message || error || "No se pudieron cargar los ajustes"),
+      },
+      500
+    );
   }
 }
 
-export async function POST(req) {
+export async function PATCH(req) {
   try {
     const sb = serverSupabase();
     const token = getBearerToken(req);
-    const { user, error } = await requireUserFromToken(sb, token);
+    const { user, error: authErr } = await requireUserFromToken(sb, token);
 
-    if (error || !user) {
-      return json({ ok: false, error: "No autorizado." }, 401);
+    if (authErr || !user) {
+      return json({ ok: false, error: "Unauthorized" }, 401);
     }
 
     const body = await req.json().catch(() => ({}));
-    const orgId = safeStr(body?.organization_id || body?.org_id || SCORE_ORG_ID).trim();
-
-    if (!isUuid(orgId)) {
-      return json({ ok: false, error: "org_id inválido." }, 400);
-    }
+    const explicitOrgId = safeStr(body?.org_id || body?.orgId).trim();
+    const orgId = await resolveOrgId(sb, explicitOrgId);
 
     const role = await getMyRoleForOrg(sb, orgId, user);
-    if (!role || !canWrite(role)) {
-      return json({ ok: false, error: "Sin permisos para guardar." }, 403);
+    if (!role || !["owner", "admin", "marketing"].includes(role)) {
+      return json({ ok: false, error: "Permisos insuficientes" }, 403);
     }
 
-    await writeSiteSettings(sb, orgId, body || {});
-    const data = await readSiteSettings(sb, orgId);
+    const payload = {
+      org_id: orgId,
+      organization_id: orgId,
+    };
 
-    return json({
-      ok: true,
-      saved: true,
-      data,
-    });
-  } catch (e) {
-    return json({ ok: false, error: String(e?.message || e) }, 500);
+    if ("hero_title" in body) payload.hero_title = safeStr(body.hero_title);
+    if ("hero_image" in body) payload.hero_image = safeStr(body.hero_image);
+    if ("promo_active" in body) payload.promo_active = !!body.promo_active;
+    if ("promo_text" in body) payload.promo_text = safeStr(body.promo_text);
+    if ("pixel_id" in body) payload.pixel_id = safeStr(body.pixel_id);
+    if ("maintenance_mode" in body) payload.maintenance_mode = !!body.maintenance_mode;
+    if ("season_key" in body) payload.season_key = safeStr(body.season_key, "default");
+
+    if ("theme" in body && body.theme && typeof body.theme === "object") payload.theme = body.theme;
+    if ("home" in body && body.home && typeof body.home === "object") payload.home = body.home;
+    if ("socials" in body && body.socials && typeof body.socials === "object") payload.socials = body.socials;
+    if ("contact" in body && body.contact && typeof body.contact === "object") {
+      const contact = body.contact;
+      payload.contact_email = safeStr(contact.email);
+      payload.contact_phone = safeStr(contact.phone);
+      payload.whatsapp_e164 = safeStr(contact.whatsapp_e164);
+      payload.whatsapp_display = safeStr(contact.whatsapp_display);
+    }
+
+    const { data, error } = await sb
+      .from("site_settings")
+      .upsert(payload, { onConflict: "org_id" })
+      .select(`
+        hero_title,
+        hero_image,
+        promo_active,
+        promo_text,
+        pixel_id,
+        maintenance_mode,
+        season_key,
+        theme,
+        home,
+        socials,
+        updated_at,
+        contact_email,
+        contact_phone,
+        whatsapp_e164,
+        whatsapp_display
+      `)
+      .maybeSingle();
+
+    if (error) {
+      return json({ ok: false, error: error.message || "No se pudo actualizar" }, 500);
+    }
+
+    return json({ ok: true, org_id: orgId, site_settings: shapeSiteSettings(data) }, 200);
+  } catch (error) {
+    return json({ ok: false, error: String(error?.message || error) }, 500);
   }
 }
