@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 
 const FALLBACK_SUPABASE_HOST = "lpbzndnavkbpxwnlbqgb.supabase.co";
-const FALLBACK_SCORESTORE_HOST = "scorestore.vercel.app"; // Migrado a Vercel
+const FALLBACK_SCORESTORE_HOST = "scorestore.vercel.app";
 
 function supabaseHost() {
   try {
@@ -13,8 +13,6 @@ function supabaseHost() {
   }
 }
 
-const SUPABASE_HOST = supabaseHost();
-
 function scorestoreHost() {
   try {
     const u = process.env.NEXT_PUBLIC_SCORESTORE_URL || process.env.SCORESTORE_URL;
@@ -25,9 +23,9 @@ function scorestoreHost() {
   }
 }
 
+const SUPABASE_HOST = supabaseHost();
 const SCORESTORE_HOST = scorestoreHost();
 
-// CSP robusto adaptado para Vercel (permite imágenes de deployments de preview de Vercel)
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -60,13 +58,12 @@ const htmlHeaders = [
 ];
 
 const nextConfig = {
-  output: "standalone", // Vercel soporta standalone perfectamente
+  output: "standalone",
   reactStrictMode: true,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: SUPABASE_HOST },
       { protocol: "https", hostname: SCORESTORE_HOST },
-      { protocol: "https", hostname: "vercel.app" }, // Permite dominios genéricos de Vercel si es necesario
     ],
   },
   async headers() {
