@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 
 const FALLBACK_SUPABASE_HOST = "lpbzndnavkbpxwnlbqgb.supabase.co";
-const FALLBACK_SCORESTORE_HOST = "scorestore.netlify.app";
+const FALLBACK_SCORESTORE_HOST = "scorestore.vercel.app"; // Migrado a Vercel
 
 function supabaseHost() {
   try {
@@ -27,12 +27,13 @@ function scorestoreHost() {
 
 const SCORESTORE_HOST = scorestoreHost();
 
+// CSP robusto adaptado para Vercel (permite imágenes de deployments de preview de Vercel)
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  `img-src 'self' data: blob: https://${SUPABASE_HOST} https://${SCORESTORE_HOST}`,
+  `img-src 'self' data: blob: https://${SUPABASE_HOST} https://${SCORESTORE_HOST} https://*.vercel.app`,
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self' 'unsafe-inline'",
   `connect-src 'self' https://${SUPABASE_HOST} wss://${SUPABASE_HOST} https://generativelanguage.googleapis.com https://api.stripe.com`,
@@ -59,12 +60,13 @@ const htmlHeaders = [
 ];
 
 const nextConfig = {
-  output: "standalone",
+  output: "standalone", // Vercel soporta standalone perfectamente
   reactStrictMode: true,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: SUPABASE_HOST },
       { protocol: "https", hostname: SCORESTORE_HOST },
+      { protocol: "https", hostname: "vercel.app" }, // Permite dominios genéricos de Vercel si es necesario
     ],
   },
   async headers() {
