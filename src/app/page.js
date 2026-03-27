@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import clsx from "clsx";
 import {
-  Activity,
   BarChart3,
   Boxes,
   Bot,
@@ -14,13 +13,11 @@ import {
   Gauge,
   Layers3,
   Loader2,
-  Megaphone,
   PackageSearch,
   RefreshCcw,
   Settings2,
   ShieldCheck,
   ShoppingBag,
-  Sparkles,
   Store,
   Truck,
   Wand2,
@@ -112,9 +109,19 @@ function HealthBadge({ label, status }) {
   );
 }
 
+// 🔥 MEJORA UX: Formulario Nativo en lugar de window.prompt
 function LoginScreen({ onLogin, loading, error }) {
+  const [email, setEmail] = useState("");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (email.trim()) {
+      onLogin(email.trim());
+    }
+  };
+
   return (
-    <main className="min-h-screen flex items-center justify-center px-4 py-10">
+    <main className="min-h-screen flex items-center justify-center px-4 py-10 unicos-shell">
       <div className="unicos-wrap w-full max-w-6xl">
         <Panel className="overflow-hidden">
           <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_.95fr]">
@@ -152,39 +159,51 @@ function LoginScreen({ onLogin, loading, error }) {
               </div>
             </div>
 
-            <div className="p-8 md:p-12 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] border-l border-white/10">
-              <div className="mx-auto max-w-md animate-unicos-slide-up">
-                <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 md:p-7 shadow-2xl backdrop-blur-xl">
+            <div className="p-8 md:p-12 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] border-l border-white/10 flex items-center">
+              <div className="mx-auto w-full max-w-md animate-unicos-slide-up">
+                <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 md:p-8 shadow-2xl backdrop-blur-xl">
                   <p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-300">Acceso seguro</p>
                   <h3 className="mt-2 text-2xl font-black text-white">Entrar al panel maestro</h3>
-                  <p className="mt-3 text-sm leading-relaxed text-slate-300">
-                    Recibe un acceso seguro en tu correo y entra directo al panel. Tu perfil abre solo las áreas que
-                    realmente puedes usar.
+                  <p className="mt-3 mb-6 text-sm leading-relaxed text-slate-300">
+                    Recibe un enlace mágico en tu correo y entra directo al panel.
                   </p>
 
                   {error ? (
-                    <div className="mt-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200">
+                    <div className="mb-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200">
                       {error}
                     </div>
                   ) : null}
 
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={onLogin}
-                    className={cls(
-                      "mt-6 w-full rounded-2xl px-4 py-3.5 text-sm font-black text-white transition",
-                      loading
-                        ? "bg-white/10 border border-white/10"
-                        : "bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
-                    )}
-                  >
-                    {loading ? "Enviando acceso seguro..." : "Recibir acceso por correo"}
-                  </button>
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                      <label htmlFor="email" className="unicos-label">Correo Electrónico</label>
+                      <input 
+                        id="email"
+                        type="email" 
+                        required
+                        disabled={loading}
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="tu@correo.com" 
+                        className="unicos-input bg-black/20"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={loading || !email}
+                      className={cls(
+                        "w-full unicos-btn px-4 py-4 text-sm text-white transition-all flex justify-center items-center gap-2",
+                        loading || !email
+                          ? "bg-white/10 border border-white/10 opacity-70"
+                          : "bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 shadow-[0_18px_50px_rgba(42,168,255,0.28)]"
+                      )}
+                    >
+                      {loading ? <Loader2 className="animate-spin" size={18} /> : "Recibir acceso por correo"}
+                    </button>
+                  </form>
 
-                  <p className="mt-4 text-xs leading-relaxed text-slate-400">
-                    Si pides varios accesos seguidos, el sistema puede pedirte esperar unos segundos antes de enviar
-                    otro enlace.
+                  <p className="mt-5 text-xs leading-relaxed text-slate-400 text-center">
+                    El sistema detectará automáticamente tu perfil y te dará acceso a las áreas correspondientes.
                   </p>
                 </div>
               </div>
@@ -339,7 +358,7 @@ function HealthSummary({ token }) {
         <button
           type="button"
           onClick={load}
-          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white hover:bg-white/10"
+          className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white hover:bg-white/10"
         >
           <RefreshCcw size={16} />
           Actualizar
@@ -418,7 +437,7 @@ function AIQuickActions({ token, orgId, role }) {
             key={q}
             type="button"
             onClick={() => run(q)}
-            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left text-sm font-semibold text-slate-200 hover:bg-white/10"
+            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left text-sm font-semibold text-slate-200 hover:bg-white/10 transition-colors"
           >
             {q}
           </button>
@@ -432,7 +451,7 @@ function AIQuickActions({ token, orgId, role }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             rows={4}
-            className="unicos-input min-h-[118px] resize-none"
+            className="unicos-input flex-1 resize-none"
             placeholder="Ejemplo: prepara un resumen ejecutivo del día, apaga la promo, explícame cómo revisar pedidos o dime qué sigue por cerrar."
           />
           <button
@@ -440,19 +459,19 @@ function AIQuickActions({ token, orgId, role }) {
             disabled={loading || !safeStr(input).trim()}
             onClick={() => run(input)}
             className={cls(
-              "min-w-[200px] rounded-2xl px-5 py-4 text-sm font-black transition text-white",
+              "unicos-btn min-w-[200px] rounded-2xl px-5 py-4 text-sm text-white transition flex justify-center items-center",
               loading || !safeStr(input).trim()
-                ? "bg-white/10 border border-white/10"
-                : "bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
+                ? "bg-white/10 border border-white/10 opacity-50"
+                : "bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 shadow-[0_18px_50px_rgba(42,168,255,0.28)]"
             )}
           >
-            {loading ? "Procesando..." : "Ejecutar"}
+            {loading ? <Loader2 className="animate-spin" size={20} /> : "Ejecutar"}
           </button>
         </div>
       </div>
 
       {answer ? (
-        <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5">
+        <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5 animate-unicos-slide-up">
           <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Respuesta</p>
           <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-200">{answer}</div>
         </div>
@@ -550,9 +569,12 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
     [products]
   );
 
+  // URL dinámica hacia Vercel
+  const scoreStoreUrl = process.env.NEXT_PUBLIC_SCORESTORE_URL || "https://scorestore.vercel.app";
+
   return (
-    <main className="min-h-screen px-4 py-6 md:py-8">
-      <div className="unicos-wrap space-y-5">
+    <main className="min-h-screen px-4 py-6 md:py-8 unicos-shell">
+      <div className="unicos-wrap space-y-5 animate-unicos-slide-up">
         <Panel className="overflow-hidden">
           <div className="relative p-6 md:p-8">
             <div className="unicos-orb unicos-orb-blue h-40 w-40 right-[-20px] top-[-20px]" />
@@ -588,7 +610,7 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
                 <button
                   type="button"
                   onClick={load}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white hover:bg-white/10"
+                  className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
                 >
                   <RefreshCcw size={16} />
                   Actualizar datos
@@ -597,17 +619,17 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
                 <button
                   type="button"
                   onClick={onGoSettings}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 px-4 py-3 text-sm font-black text-slate-950 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
+                  className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 px-4 py-3 text-sm text-slate-950 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
                 >
                   <Settings2 size={16} />
                   Abrir configuración
                 </button>
 
                 <a
-                  href="https://scorestore.netlify.app"
+                  href={scoreStoreUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white hover:bg-white/10"
+                  className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
                 >
                   <ExternalLink size={16} />
                   Ver sitio público
@@ -615,7 +637,7 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
 
                 <a
                   href="#panel-ia"
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white hover:bg-white/10"
+                  className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
                 >
                   <Wand2 size={16} />
                   Usar asistente
@@ -677,7 +699,7 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
               <button
                 type="button"
                 onClick={load}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white hover:bg-white/10"
+                className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white hover:bg-white/10"
               >
                 <RefreshCcw size={16} />
                 Refrescar
@@ -704,14 +726,14 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
 
                 <div className="divide-y divide-white/10">
                   {(orders || []).slice(0, 10).map((row) => (
-                    <div key={row.id} className="grid grid-cols-[1.15fr_.75fr_.8fr_.7fr] gap-3 px-4 py-3 text-sm">
+                    <div key={row.id} className="grid grid-cols-[1.15fr_.75fr_.8fr_.7fr] gap-3 px-4 py-3 text-sm hover:bg-white/5 transition-colors">
                       <div className="font-bold text-white">{safeStr(row.stripe_session_id || row.id)}</div>
                       <div className="text-slate-300">{dateTime(row.created_at)}</div>
                       <div className="text-slate-200 font-bold">{money(row.amount_total_mxn)}</div>
                       <div>
                         <span
                           className={cls(
-                            "inline-flex rounded-full px-3 py-1 text-xs font-black",
+                            "inline-flex rounded-full px-3 py-1 text-[11px] font-black",
                             ["paid", "fulfilled"].includes(safeStr(row.status).toLowerCase())
                               ? "bg-emerald-500/14 text-emerald-100 border border-emerald-400/20"
                               : "bg-amber-500/14 text-amber-100 border border-amber-400/20"
@@ -746,7 +768,7 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
 
             <div className="mt-5 space-y-3">
               {(auditRows || []).slice(0, 8).map((row) => (
-                <div key={row.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                <div key={row.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 hover:bg-white/10 transition-colors">
                   <p className="text-sm font-black text-white">{safeStr(row.summary || row.action)}</p>
                   <div className="mt-1 flex items-center justify-between gap-3 text-xs text-slate-400">
                     <span>{safeStr(row.actor_email || "Sistema")}</span>
@@ -855,23 +877,21 @@ export default function HomePage() {
     return () => subscription?.unsubscribe?.();
   }, [mounted, loadSessionAndOrg]);
 
-  const handleLogin = useCallback(async () => {
+  const handleLogin = useCallback(async (emailToLogin) => {
     if (!supabase) return;
 
     try {
       setAuthLoading(true);
       setGlobalError("");
 
-      const email = window.prompt("Escribe tu correo autorizado para recibir el acceso a UnicOs:");
-      if (!email) return;
-
+      // Dinamismo para Vercel
       const origin =
         typeof window !== "undefined" && window.location?.origin
           ? window.location.origin
-          : "https://unicoapps.netlify.app";
+          : (process.env.NEXT_PUBLIC_SITE_URL || "https://unicos-admin.vercel.app");
 
       const { error } = await supabase.auth.signInWithOtp({
-        email,
+        email: emailToLogin,
         options: {
           emailRedirectTo: `${origin}/auth/callback`,
         },
@@ -879,7 +899,7 @@ export default function HomePage() {
 
       if (error) throw error;
 
-      alert("Listo. Te envié un acceso seguro a tu correo.");
+      alert(`Listo. Te envié un acceso seguro a ${emailToLogin}. Revisa tu bandeja o SPAM.`);
     } catch (e) {
       setGlobalError(String(e?.message || e));
     } finally {
@@ -910,16 +930,16 @@ export default function HomePage() {
 
   if (!SUPABASE_CONFIGURED) {
     return (
-      <main className="min-h-screen flex items-center justify-center px-4 py-10">
+      <main className="min-h-screen flex items-center justify-center px-4 py-10 unicos-shell">
         <div className="unicos-wrap w-full max-w-2xl">
-          <Panel className="p-8 text-center">
+          <Panel className="p-8 text-center animate-unicos-slide-up">
             <div className="mx-auto mb-5 h-20 w-20 unicos-brand-frame p-3">
               <Image src="/logo-unico.png" alt="UnicOs" width={80} height={80} className="h-full w-full object-contain rounded-[18px]" />
             </div>
             <p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-300">Configuración pendiente</p>
             <h1 className="mt-3 text-3xl font-black text-white">UnicOs no está conectado</h1>
             <p className="mt-4 text-sm leading-relaxed text-slate-300">
-              Falta conectar las llaves públicas del panel para iniciar sesión desde este entorno.
+              Falta conectar las llaves públicas del panel para iniciar sesión desde este entorno de Vercel.
             </p>
           </Panel>
         </div>
@@ -933,20 +953,20 @@ export default function HomePage() {
 
   if (view === "settings") {
     return (
-      <div className="min-h-screen px-4 py-6">
+      <div className="min-h-screen px-4 py-6 unicos-shell animate-unicos-slide-up">
         <div className="unicos-wrap space-y-5">
           <Panel className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Configuración</p>
-                <h2 className="mt-2 text-2xl font-black text-white">Score Store</h2>
+                <h2 className="mt-2 text-2xl font-black text-white">{orgName || "Ajustes del sitio"}</h2>
               </div>
 
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
                   onClick={() => setView("dashboard")}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white hover:bg-white/10"
+                  className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
                 >
                   <Eye size={16} />
                   Volver al panel
@@ -955,7 +975,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white hover:bg-white/10"
+                  className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10 hover:bg-rose-500/10 hover:text-rose-200 hover:border-rose-400/20"
                 >
                   Cerrar sesión
                 </button>
@@ -964,7 +984,7 @@ export default function HomePage() {
           </Panel>
 
           <iframe
-            title="Score Store Settings"
+            title="Ajustes del Sitio"
             src="/scorestore-settings"
             className="h-[calc(100vh-180px)] w-full rounded-[28px] border border-white/10 bg-[rgba(8,18,34,0.82)]"
           />
@@ -986,7 +1006,7 @@ export default function HomePage() {
       <button
         type="button"
         onClick={handleLogout}
-        className="fixed bottom-4 right-4 z-50 rounded-2xl border border-white/10 bg-[rgba(8,18,34,0.88)] px-4 py-3 text-sm font-black text-white shadow-2xl hover:bg-[rgba(8,18,34,0.95)]"
+        className="unicos-btn fixed bottom-4 right-4 z-50 rounded-[18px] border border-white/10 bg-[rgba(8,18,34,0.88)] px-5 py-3 text-xs font-black text-white shadow-2xl hover:bg-[rgba(8,18,34,0.95)] hover:border-rose-400/20 hover:text-rose-200"
       >
         Cerrar sesión
       </button>
