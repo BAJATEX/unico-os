@@ -1,9 +1,9 @@
-/* UnicOs — Service Worker (2026-03-03c)
+/* UnicOs — Service Worker (Migración Vercel)
    Objetivo:
    - Cachear solo assets estáticos (Next chunks / imágenes / iconos)
    - NO interceptar navegación (Lighthouse/DevTools estable)
 */
-const VERSION = "unicos-sw-2026-03-03c";
+const VERSION = "unicos-sw-vercel-v1"; // Forzamos actualización de caché en la migración
 const STATIC_CACHE = `unicos-static-${VERSION}`;
 const RUNTIME_CACHE = `unicos-runtime-${VERSION}`;
 
@@ -85,12 +85,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (PRECACHE.includes(url.pathname)) {
-    event.respondWith(cacheFirst(req, STATIC_CACHE));
-    return;
-  }
-
-  if (/\.(png|jpg|jpeg|webp|svg|ico)$/i.test(url.pathname)) {
-    event.respondWith(staleWhileRevalidate(req, RUNTIME_CACHE));
+    event.respondWith(staleWhileRevalidate(req, STATIC_CACHE));
     return;
   }
 });
