@@ -1,20 +1,15 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { CreditCard, Truck, RefreshCcw, PiggyBank, Activity, ExternalLink, TrendingUp } from "lucide-react";
+import { CreditCard, Truck, RefreshCcw, PiggyBank, Activity, TrendingUp } from "lucide-react";
 import HelpTip from "./HelpTip";
-
-const num = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
 
 const moneyMXN = (v) =>
   new Intl.NumberFormat("es-MX", { 
     style: "currency", 
     currency: "MXN",
     maximumFractionDigits: 0 
-  }).format(num(v));
+  }).format(v || 0);
 
 function MiniKPI({ icon, label, value, note, trend }) {
   return (
@@ -34,22 +29,22 @@ function MiniKPI({ icon, label, value, note, trend }) {
   );
 }
 
-export default function FinanceRealPanels({ orgId, token, toast }) {
+export default function FinanceRealPanels({ orgId, token }) {
   const [busy, setBusy] = useState(false);
-  const [data, setData] = useState({ stripe: null, envia: null });
+  const [data, setData] = useState(null);
 
   const load = useCallback(async () => {
     if (!orgId || busy) return;
     setBusy(true);
     try {
-      // Endpoint unificado para optimizar requests en Vercel
-      const res = await fetch(`/api/finance/summary?orgId=${orgId}`, {
+      // RUTA CORREGIDA SEGÚN TU ESTRUCTURA:
+      const res = await fetch(`/api/stripe/summary?orgId=${orgId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const json = await res.json();
-      setData(json);
+      if (json.ok) setData(json);
     } catch (e) {
-      console.error("Finance Load Error:", e);
+      console.error("Finance Error:", e);
     } finally {
       setBusy(false);
     }
@@ -57,40 +52,43 @@ export default function FinanceRealPanels({ orgId, token, toast }) {
 
   useEffect(() => { load(); }, [orgId]);
 
+  const kpi = data?.kpi || {};
+  const stripe = data?.stripe_dashboard || {};
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MiniKPI 
-          label="Stripe Balance" 
-          value={moneyMXN(data.stripe?.available)} 
-          icon={<CreditCard size={20} />}
-          note="Fondos listos para retiro"
-        />
-        <MiniKPI 
-          label="Ventas Mes" 
-          value={moneyMXN(data.stripe?.monthly_volume)} 
+          label="Ventas Brutas" 
+          value={moneyMXN(kpi.sales_mxn)} 
           icon={<PiggyBank size={20} />}
-          note="+12% vs mes anterior"
-          trend={true}
+          note="Ingresos totales en Stripe"
         />
         <MiniKPI 
-          label="Logística (Envía)" 
-          value={moneyMXN(data.envia?.total_spent)} 
+          label="Costo Envíos" 
+          value={moneyMXN(kpi.envia_cost_mxn)} 
           icon={<Truck size={20} />}
           note="Gasto acumulado en guías"
         />
         <MiniKPI 
-          label="Margen Estimado" 
-          value="74%" 
+          label="Comisiones Stripe" 
+          value={moneyMXN(kpi.stripe_fee_mxn)} 
+          icon={<CreditCard size={20} />}
+          note="Fees procesador"
+        />
+        <MiniKPI 
+          label="Utilidad Visible" 
+          value={moneyMXN(kpi.visible_profit_mxn)} 
           icon={<Activity size={20} />}
-          note="Basado en costos de envío"
+          note="Neto tras costos de operación"
+          trend={true}
         />
       </div>
 
-      <div className="unicos-card overflow-hidden border border-white/5">
+      <div className="unicos-card overflow-hidden">
         <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
           <h3 className="font-black text-white uppercase tracking-widest text-sm flex items-center gap-2">
-            <Activity size={18} className="text-sky-400" /> Últimos Movimientos
+            <CreditCard size={18} className="text-sky-400" /> Cargos Recientes (Stripe)
           </h3>
           <button onClick={load} className={`${busy ? 'animate-spin' : ''} text-slate-400 hover:text-white transition-colors`}>
             <RefreshCcw size={18} />
@@ -101,23 +99,23 @@ export default function FinanceRealPanels({ orgId, token, toast }) {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="text-[10px] font-black uppercase tracking-widest text-slate-500 bg-black/20">
-                <th className="px-6 py-4">Fecha</th>
-                <th className="px-6 py-4">Concepto</th>
-                <th className="px-6 py-4">Tracking</th>
-                <th className="px-6 py-4 text-right">Monto</th>
+                <th className="px-6 py-4">ID Cargo</th>
+                <th className="px-6 py-4">Estado</th>
+                <th className="px-6 py-4 text-right">Monto Neto</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {(data.envia?.labels || []).map((r) => (
-                <tr key={r.id} className="hover:bg-white/[0.02] transition-colors group">
-                  <td className="px-6 py-4 text-xs font-bold text-slate-400">
-                    {new Date(r.created_at).toLocaleDateString("es-MX")}
-                  </td>
+              {(stripe.charges || []).map((c) => (
+                <tr key={c.id} className="hover:bg-white/[0.02] transition-colors">
+                  <td className="px-6 py-4 text-xs font-mono text-sky-400/70">{c.id}</td>
                   <td className="px-6 py-4">
-                    <div className="text-sm font-black text-white uppercase">{r.carrier}</div>
+                    <span className={`unicos-badge-${c.paid ? 'ok' : 'bad'}`}>
+                      {c.status}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 text-xs font-mono text-sky-400/70">{r.tracking}</td>
-                  <td className="px-6 py-4 text-right font-black text-white">{moneyMXN(r.total_amount_mxn)}</td>
+                  <td className="px-6 py-4 text-right font-black text-white">
+                    {moneyMXN(c.amount / 100)}
+                  </td>
                 </tr>
               ))}
             </tbody>
