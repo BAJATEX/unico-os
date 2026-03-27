@@ -12,7 +12,8 @@ export const viewport = {
 };
 
 export const metadata = {
-  metadataBase: new URL("https://unicoapps.netlify.app"),
+  // Migrado a Vercel dinámica o fallback
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://unicos-admin.vercel.app"),
   title: "UnicOs Admin",
   description: "Centro de control de UnicOs para administrar operaciones, contenido y tiendas conectadas.",
   manifest: "/manifest.json",
@@ -35,7 +36,6 @@ export default function RootLayout({ children }) {
     <html lang="es-MX">
       <head>
         <meta charSet="utf-8" />
-        <meta httpEquiv="Content-Type" content="text/html; charset=utf-8" />
       </head>
       <body>
         <SwRegister />
