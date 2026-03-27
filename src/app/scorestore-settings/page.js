@@ -1,227 +1,157 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 
 const SCORESTORE_URL =
   process.env.NEXT_PUBLIC_SCORESTORE_URL || "https://scorestore.vercel.app";
 
-const FALLBACK_SUPPORT_EMAIL = "ventas.unicotextil@gmail.com";
-const FALLBACK_SUPPORT_WA = "https://wa.me/5216642368701";
-
-const rowStyle = {
-  border: "1px solid rgba(0,0,0,0.08)",
-  borderRadius: "16px",
-  padding: "14px",
-  background: "rgba(255,255,255,0.75)",
+const noStoreHeaders = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
 };
 
-function Badge({ children }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "6px 10px",
-        borderRadius: 999,
-        background: "rgba(225,6,0,0.08)",
-        color: "#e10600",
-        fontWeight: 800,
-        fontSize: 12,
-      }}
-    >
-      {children}
-    </span>
-  );
-}
+const safeStr = (v, d = "") => (typeof v === "string" ? v : v == null ? d : String(v));
 
-export default function ScoreStoreSettingsPage() {
+export default function ScorestoreSettingsPage() {
   const [loading, setLoading] = useState(true);
-  const [site, setSite] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [error, setError] = useState("");
 
-  const supportEmail = useMemo(() => {
-    const email = site?.contact?.email?.trim();
-    return email || FALLBACK_SUPPORT_EMAIL;
-  }, [site]);
-
-  const supportWa = useMemo(() => {
-    const wa = site?.contact?.whatsapp_e164?.trim();
-    return wa ? `https://wa.me/${wa}` : FALLBACK_SUPPORT_WA;
-  }, [site]);
+  const apiBase = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return "";
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    let alive = true;
 
-    async function load() {
+    const load = async () => {
+      setLoading(true);
+      setError("");
+
       try {
-        setLoading(true);
-        setError("");
+        const token = typeof window !== "undefined" ? localStorage.getItem("unicos_token") || "" : "";
+        const res = await fetch("/api/score/site-settings", {
+          method: "GET",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          cache: "no-store",
+        });
 
-        const res = await fetch("/api/site_settings", { cache: "no-store" });
-        const data = await res.json().catch(() => null);
-
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data?.ok) {
-          throw new Error(data?.error || `HTTP ${res.status}`);
+          throw new Error(data?.error || "No se pudieron cargar los ajustes");
         }
 
-        if (!cancelled) setSite(data);
+        if (!alive) return;
+        setSettings(data);
       } catch (e) {
-        if (!cancelled) setError(String(e?.message || "No fue posible cargar la configuración."));
+        if (!alive) return;
+        setError(String(e?.message || e || "Error desconocido"));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (alive) setLoading(false);
       }
-    }
+    };
 
     load();
+
     return () => {
-      cancelled = true;
+      alive = false;
     };
   }, []);
 
-  return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: 24,
-        background:
-          "linear-gradient(180deg, rgba(10,10,10,0.98), rgba(15,15,15,0.96))",
-        color: "#fff",
-      }}
-    >
-      <div style={{ maxWidth: 1120, margin: "0 auto" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 16,
-            flexWrap: "wrap",
-            marginBottom: 24,
-          }}
-        >
-          <div>
-            <Badge>Score Store Settings</Badge>
-            <h1 style={{ margin: "12px 0 6px", fontSize: "clamp(28px, 4vw, 42px)" }}>
-              Centro de sincronización
-            </h1>
-            <p style={{ margin: 0, color: "rgba(255,255,255,0.72)", lineHeight: 1.6 }}>
-              Configuración pública, branding, enlaces y contacto conectados con Score Store.
-            </p>
-          </div>
+  const copyText = async (value) => {
+    try {
+      await navigator.clipboard.writeText(String(value || ""));
+    } catch {}
+  };
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+  return (
+    <main className="min-h-screen bg-neutral-950 text-white">
+      <div className="hero__bg fixed inset-0 -z-10" aria-hidden="true" />
+      <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="vfx-glass-container rounded-[28px] p-5 sm:p-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-xs font-black uppercase tracking-[0.28em] text-white/70">
+                Score Store Settings
+              </div>
+              <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
+                Centro de configuración conectado
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-white/70">
+                Panel alineado a Vercel para leer y actualizar ajustes públicos del ecosistema Score Store.
+              </p>
+            </div>
+
             <a
               href={SCORESTORE_URL}
               target="_blank"
               rel="noreferrer"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "12px 16px",
-                borderRadius: 999,
-                background: "#e10600",
-                color: "#fff",
-                fontWeight: 800,
-                textDecoration: "none",
-              }}
+              className="btn btn--primary cinematic-btn neon-border justify-center"
             >
               Abrir Score Store
             </a>
+          </div>
 
-            <Link
-              href="/"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "12px 16px",
-                borderRadius: 999,
-                background: "rgba(255,255,255,0.08)",
-                color: "#fff",
-                fontWeight: 800,
-                textDecoration: "none",
-                border: "1px solid rgba(255,255,255,0.12)",
-              }}
-            >
-              Volver al panel
-            </Link>
+          <div className="mt-6 grid gap-4 lg:grid-cols-3">
+            <div className="glass-panel rounded-2xl p-4">
+              <div className="text-xs font-black uppercase tracking-[0.2em] text-white/60">
+                URL pública
+              </div>
+              <div className="mt-2 break-all text-sm font-bold text-white">
+                {SCORESTORE_URL}
+              </div>
+              <button
+                type="button"
+                onClick={() => copyText(SCORESTORE_URL)}
+                className="btn btn--ghost mt-4 w-full"
+              >
+                Copiar URL
+              </button>
+            </div>
+
+            <div className="glass-panel rounded-2xl p-4 lg:col-span-2">
+              <div className="text-xs font-black uppercase tracking-[0.2em] text-white/60">
+                Estado
+              </div>
+
+              {loading ? (
+                <p className="mt-3 text-sm text-white/70">Cargando ajustes…</p>
+              ) : error ? (
+                <p className="mt-3 text-sm font-semibold text-red-300">{error}</p>
+              ) : (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-white/5 p-4">
+                    <div className="text-xs font-black uppercase tracking-[0.16em] text-white/50">
+                      Promo activa
+                    </div>
+                    <div className="mt-1 text-sm font-bold">
+                      {settings?.promo_active ? "Sí" : "No"}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-white/5 p-4">
+                    <div className="text-xs font-black uppercase tracking-[0.16em] text-white/50">
+                      Última actualización
+                    </div>
+                    <div className="mt-1 text-sm font-bold">
+                      {safeStr(settings?.updated_at, "—")}
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-white/5 p-4 sm:col-span-2">
+                    <div className="text-xs font-black uppercase tracking-[0.16em] text-white/50">
+                      Texto promo
+                    </div>
+                    <div className="mt-1 text-sm font-bold">
+                      {safeStr(settings?.promo_text, "Sin texto activo")}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-
-        {loading ? (
-          <div style={rowStyle}>Cargando configuración...</div>
-        ) : error ? (
-          <div style={{ ...rowStyle, borderColor: "rgba(225,6,0,0.35)", color: "#fff" }}>
-            {error}
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: 16,
-            }}
-          >
-            <section style={rowStyle}>
-              <h2 style={{ marginTop: 0 }}>Contacto</h2>
-              <p style={{ margin: "10px 0" }}>
-                <strong>Email:</strong> {supportEmail}
-              </p>
-              <p style={{ margin: "10px 0" }}>
-                <strong>WhatsApp:</strong>{" "}
-                <a href={supportWa} target="_blank" rel="noreferrer" style={{ color: "#e10600" }}>
-                  {site?.contact?.whatsapp_display || "664 236 8701"}
-                </a>
-              </p>
-              <p style={{ margin: "10px 0" }}>
-                <strong>Teléfono:</strong> {site?.contact?.phone || "6642368701"}
-              </p>
-            </section>
-
-            <section style={rowStyle}>
-              <h2 style={{ marginTop: 0 }}>Tienda conectada</h2>
-              <p style={{ margin: "10px 0" }}>
-                <strong>Nombre:</strong> {site?.store?.name || "SCORE STORE"}
-              </p>
-              <p style={{ margin: "10px 0" }}>
-                <strong>Estado:</strong>{" "}
-                {site?.maintenance_mode ? "Mantenimiento" : "Operativa"}
-              </p>
-              <p style={{ margin: "10px 0" }}>
-                <strong>Promoción:</strong>{" "}
-                {site?.promo_active ? "Activa" : "Inactiva"}
-              </p>
-            </section>
-
-            <section style={rowStyle}>
-              <h2 style={{ marginTop: 0 }}>Notas públicas</h2>
-              <p style={{ margin: "10px 0", lineHeight: 1.6 }}>
-                {site?.home?.footer_note || "Pago cifrado vía Stripe. Aceptamos OXXO Pay."}
-              </p>
-              <p style={{ margin: "10px 0", lineHeight: 1.6 }}>
-                {site?.home?.shipping_note || "Logística inteligente internacional con Envía.com."}
-              </p>
-            </section>
-
-            <section style={rowStyle}>
-              <h2 style={{ marginTop: 0 }}>Enlaces oficiales</h2>
-              <p style={{ margin: "10px 0" }}>
-                <a href={SCORESTORE_URL} target="_blank" rel="noreferrer" style={{ color: "#e10600" }}>
-                  {SCORESTORE_URL}
-                </a>
-              </p>
-              <p style={{ margin: "10px 0" }}>
-                <Link href="/legal" style={{ color: "#e10600" }}>
-                  Ver legales
-                </Link>
-              </p>
-            </section>
-          </div>
-        )}
-      </div>
+      </section>
     </main>
   );
 }
