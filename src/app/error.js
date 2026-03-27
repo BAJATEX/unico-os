@@ -27,20 +27,23 @@ export default function GlobalError({ error }) {
   }, [error]);
 
   return (
-    <div className="h-screen w-full flex items-center justify-center bg-[#0a0f1c] text-white p-6 font-sans">
-      <div className="text-center max-w-md bg-white/5 p-10 rounded-3xl border border-white/10 shadow-2xl backdrop-blur-md">
-        <div className="w-20 h-20 bg-blue-500/20 text-blue-400 rounded-full flex items-center justify-center mx-auto mb-6">
-          <ShieldAlert size={40} />
+    <div className="h-screen w-full flex items-center justify-center bg-[var(--u-bg)] text-[var(--u-text)] p-6 font-sans unicos-shell">
+      <div className="text-center max-w-md unicos-glass p-10 rounded-[var(--u-radius-xl)] animate-unicos-slide-up">
+        <div className="w-20 h-20 unicos-glass-soft rounded-full flex items-center justify-center mx-auto mb-6">
+          <ShieldAlert size={40} className="text-[var(--u-teal)]" />
         </div>
-        <h2 className="text-2xl font-black mb-2 tracking-tight">Sincronizando Sistema…</h2>
-        <p className="text-slate-400 text-sm mb-8 leading-relaxed">
-          Detecté un desajuste temporal de módulos (actualización en curso). Para continuar, refresca la app.
+        <h2 className="text-2xl font-black mb-2 tracking-tight unicos-blue-text">
+          Sincronizando Sistema…
+        </h2>
+        <p className="text-[var(--u-text-2)] text-sm mb-8 leading-relaxed">
+          Se detectó un desajuste temporal de módulos (actualización en curso). Para continuar, refresca la conexión de red.
         </p>
         <button
           onClick={hardReloadOnce}
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
+          className="w-full unicos-btn text-white py-4 flex items-center justify-center gap-2"
+          style={{ background: "linear-gradient(135deg, var(--u-blue), var(--u-teal-2))" }}
         >
-          <RefreshCcw size={18} /> Refrescar
+          <RefreshCcw size={18} /> Refrescar Conexión
         </button>
       </div>
     </div>
