@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || "";
-const USD_MXN = Number(process.env.USD_MXN || process.env.FX_USD_TO_MXN || "18");
+const USD_MXN = Number(process.env.USD_MXN || process.env.FX_USD_TO_MXN || "17.20");
 
 const noStoreHeaders = {
   "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
@@ -22,7 +22,6 @@ const safeNum = (v, d = 0) => {
 };
 
 const safeStr = (v, d = "") => (typeof v === "string" ? v : v == null ? d : String(v));
-const normEmail = (s) => safeStr(s).trim().toLowerCase();
 
 function isUuid(v) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -30,259 +29,127 @@ function isUuid(v) {
   );
 }
 
-function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : "";
-}
-
-async function getMyRoleForOrg(sb, orgId, user) {
-  const email = normEmail(user?.email);
-  const uid = safeStr(user?.id);
-
-  const q1 = await sb
-    .from("admin_users")
-    .select("role,is_active,organization_id,org_id,email,user_id")
-    .eq("is_active", true)
-    .or(`organization_id.eq.${orgId},org_id.eq.${orgId}`)
-    .or(`email.ilike.${email},user_id.eq.${uid}`)
-    .limit(20);
-
-  if (!q1.error && Array.isArray(q1.data) && q1.data.length) {
-    const exact =
-      q1.data.find((r) => safeStr(r?.organization_id || r?.org_id) === safeStr(orgId)) || q1.data[0];
-    return safeStr(exact?.role).toLowerCase();
+// Helper para llamadas a Stripe sin SDK
+async function fetchStripe(path) {
+  if (!STRIPE_KEY) return null;
+  try {
+    const r = await fetch(`https://api.stripe.com/v1/${path}`, {
+      headers: {
+        Authorization: `Bearer ${STRIPE_KEY}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
   }
-
-  return null;
-}
-
-function canViewFinance(role) {
-  return ["owner", "admin", "marketing"].includes(safeStr(role).toLowerCase());
-}
-
-const fxToMXN = (currency) => {
-  const c = safeStr(currency).toLowerCase();
-  if (c === "mxn") return 1;
-  if (c === "usd") return USD_MXN;
-  return 1;
-};
-
-const stripeFetch = async (path, params = {}) => {
-  if (!STRIPE_KEY) {
-    throw new Error("STRIPE_SECRET_KEY no configurada en UnicOs.");
-  }
-
-  const url = new URL(`https://api.stripe.com${path}`);
-
-  Object.entries(params).forEach(([k, v]) => {
-    if (v === undefined || v === null || v === "") return;
-    if (Array.isArray(v)) {
-      v.forEach((item) => url.searchParams.append(k, String(item)));
-    } else {
-      url.searchParams.set(k, String(v));
-    }
-  });
-
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${STRIPE_KEY}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    cache: "no-store",
-  });
-
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data?.error?.message || data?.message || `Stripe error (${res.status})`);
-  }
-
-  return data;
-};
-
-async function getSessionChargeMetrics(sessionId) {
-  const session = await stripeFetch(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
-    "expand[]": ["payment_intent.latest_charge.balance_transaction"],
-  });
-
-  const pi = session?.payment_intent;
-  const charge = pi?.latest_charge;
-  const bt = charge?.balance_transaction;
-
-  const currency = safeStr(bt?.currency || session?.currency || "mxn").toLowerCase();
-  const fx = fxToMXN(currency);
-
-  const gross = safeNum(session?.amount_total, 0);
-  const fee = safeNum(bt?.fee, 0);
-  const net = safeNum(bt?.net, 0);
-  const refunded = safeNum(charge?.amount_refunded, 0);
-
-  return {
-    session_id: sessionId,
-    gross_mxn: (gross / 100) * fx,
-    fee_mxn: (fee / 100) * fx,
-    net_mxn: (net / 100) * fx,
-    refunded_mxn: (refunded / 100) * fx,
-    disputed: !!charge?.disputed,
-    currency,
-  };
 }
 
 export async function GET(req) {
   try {
-    const sb = serverSupabase();
-    const token = getBearerToken(req);
-
-    const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr || !user) {
-      return json({ ok: false, error: "No autorizado." }, 401);
-    }
+    // 1. Auth & Params
+    const { user, token, error: authError } = await requireUserFromToken(req);
+    if (authError || !user) return json({ ok: false, error: "Unauthorized" }, 401);
 
     const { searchParams } = new URL(req.url);
-    const orgId = safeStr(searchParams.get("org_id")).trim();
-    const days = Math.max(7, Math.min(180, safeNum(searchParams.get("days"), 30)));
+    const orgId = searchParams.get("orgId");
+    const days = safeNum(searchParams.get("days"), 30);
 
-    if (!isUuid(orgId)) {
-      return json({ ok: false, error: "Falta org_id válido." }, 400);
-    }
+    if (!isUuid(orgId)) return json({ ok: false, error: "Invalid orgId" }, 400);
 
-    const role = await getMyRoleForOrg(sb, orgId, user);
+    const dateLimit = new Date();
+    dateLimit.setDate(dateLimit.getDate() - days);
+    const dateIso = dateLimit.toISOString();
 
-    if (!role) return json({ ok: false, error: "No autorizado." }, 403);
-    if (!canViewFinance(role)) return json({ ok: false, error: "Sin permisos." }, 403);
+    const supabase = serverSupabase(token);
 
-    const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    // 2. EJECUCIÓN EN PARALELO (Optimización Crítica)
+    // Lanzamos las 5 peticiones simultáneamente
+    const [ordersRes, labelsRes, stripeBalance, stripePayouts, stripeCharges] = await Promise.all([
+      supabase
+        .from("orders")
+        .select("id, total_amount, stripe_session_id, created_at")
+        .eq("organization_id", orgId)
+        .gte("created_at", dateIso),
+      supabase
+        .from("shipping_labels")
+        .select("id, total_amount_mxn, raw, created_at")
+        .eq("organization_id", orgId)
+        .gte("created_at", dateIso),
+      fetchStripe("balance"),
+      fetchStripe("payouts?limit=10"),
+      fetchStripe("charges?limit=50"),
+    ]);
 
-    const { data: orders, error: ordersErr } = await sb
-      .from("orders")
-      .select(`
-        id,
-        amount_total_mxn,
-        stripe_session_id,
-        stripe_payment_intent_id,
-        status,
-        created_at,
-        shipping_total_mxn,
-        envia_cost_mxn,
-        org_id,
-        organization_id
-      `)
-      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
-      .in("status", ["paid", "fulfilled"])
-      .gte("created_at", sinceIso)
-      .order("created_at", { ascending: false })
-      .limit(250);
+    const orderRows = ordersRes.data || [];
+    const labelRows = labelsRes.data || [];
 
-    if (ordersErr) {
-      throw new Error(ordersErr.message || "No se pudieron leer órdenes.");
-    }
+    // 3. Cálculos de Ventas y Logística
+    let salesMXN = 0;
+    orderRows.forEach((o) => {
+      salesMXN += safeNum(o.total_amount);
+    });
 
-    const orderRows = Array.isArray(orders) ? orders : [];
+    let enviaCostMXN = 0;
+    labelRows.forEach((l) => {
+      enviaCostMXN += safeNum(l.total_amount_mxn);
+    });
 
-    const sessionIds = Array.from(
-      new Set(
-        orderRows
-          .map((o) => safeStr(o?.stripe_session_id).trim())
-          .filter(Boolean)
-      )
-    ).slice(0, 120);
+    // 4. Cálculos de Stripe (Fees y Disputas)
+    let stripeFeeMXN = 0;
+    let refundedMXN = 0;
+    let disputes = 0;
 
-    const sessionMetrics = [];
-    for (let i = 0; i < sessionIds.length; i += 5) {
-      const chunk = sessionIds.slice(i, i + 5);
-      const result = await Promise.all(
-        chunk.map((sid) =>
-          getSessionChargeMetrics(sid).catch(() => ({
-            session_id: sid,
-            gross_mxn: 0,
-            fee_mxn: 0,
-            net_mxn: 0,
-            refunded_mxn: 0,
-            disputed: false,
-            currency: "mxn",
-          }))
-        )
-      );
-      sessionMetrics.push(...result);
-    }
+    const chargesData = stripeCharges?.data || [];
+    chargesData.forEach((c) => {
+      // Si el fee viene en USD (común en cuentas internacionales), convertimos usando el FX del .env
+      const fee = safeNum(c.application_fee_amount || 0) / 100;
+      if (c.currency === "usd") {
+        stripeFeeMXN += fee * USD_MXN;
+      } else {
+        stripeFeeMXN += fee;
+      }
 
-    const salesMXN = orderRows.reduce((acc, o) => acc + safeNum(o?.amount_total_mxn, 0), 0);
-    const stripeFeeMXN = sessionMetrics.reduce((acc, x) => acc + safeNum(x?.fee_mxn, 0), 0);
-    const stripeNetMXN = sessionMetrics.reduce((acc, x) => acc + safeNum(x?.net_mxn, 0), 0);
-    const refundedMXN = sessionMetrics.reduce((acc, x) => acc + safeNum(x?.refunded_mxn, 0), 0);
-    const enviaCostMXN = orderRows.reduce((acc, o) => acc + safeNum(o?.envia_cost_mxn, 0), 0);
-    const shippingCollectedMXN = orderRows.reduce(
-      (acc, o) => acc + safeNum(o?.shipping_total_mxn, 0),
-      0
-    );
-    const disputes = sessionMetrics.reduce((acc, x) => acc + (x?.disputed ? 1 : 0), 0);
+      if (c.refunded) refundedMXN += safeNum(c.amount_refunded) / 100;
+      if (c.disputed) disputes++;
+    });
 
-    const visibleProfitMXN = Math.max(
-      0,
-      Math.round((salesMXN - stripeFeeMXN - enviaCostMXN) * 0.7 * 100) / 100
-    );
-
-    let balance = null;
-    let payouts = null;
-    let charges = null;
-
-    try {
-      const [balanceRes, payoutsRes, chargesRes] = await Promise.all([
-        stripeFetch("/v1/balance"),
-        stripeFetch("/v1/payouts", { limit: "10" }),
-        stripeFetch("/v1/charges", { limit: "20" }),
-      ]);
-
-      balance = balanceRes || null;
-      payouts = payoutsRes || null;
-      charges = chargesRes || null;
-    } catch {
-      balance = null;
-      payouts = null;
-      charges = null;
-    }
+    // 5. Utilidad Visible (Ventas - Envíos - Fees Stripe)
+    const visibleProfitMXN = Math.round((salesMXN - enviaCostMXN - stripeFeeMXN) * 100) / 100;
 
     return json({
       ok: true,
-      scope: {
-        org_id: orgId,
-        days,
-        role,
-        orders_count: orderRows.length,
-        stripe_sessions_count: sessionIds.length,
-      },
       kpi: {
         sales_mxn: Math.round(salesMXN * 100) / 100,
-        shipping_collected_mxn: Math.round(shippingCollectedMXN * 100) / 100,
-        stripe_fee_mxn: Math.round(stripeFeeMXN * 100) / 100,
         envia_cost_mxn: Math.round(enviaCostMXN * 100) / 100,
+        stripe_fee_mxn: Math.round(stripeFeeMXN * 100) / 100,
         visible_profit_mxn: visibleProfitMXN,
-        stripe_net_mxn: Math.round(stripeNetMXN * 100) / 100,
         refunded_mxn: Math.round(refundedMXN * 100) / 100,
         disputes,
+        orders_count: orderRows.length
       },
       stripe_dashboard: {
-        balance_available: balance?.available || [],
-        balance_pending: balance?.pending || [],
-        payouts: payouts?.data || [],
-        charges: Array.isArray(charges?.data)
-          ? charges.data.map((c) => ({
-              id: c.id,
-              created: c.created,
-              status: c.status,
-              paid: c.paid,
-              amount: c.amount,
-              amount_refunded: c.amount_refunded,
-              currency: c.currency,
-              disputed: !!c.disputed,
-            }))
-          : [],
+        balance_available: stripeBalance?.available || [],
+        balance_pending: stripeBalance?.pending || [],
+        payouts: stripePayouts?.data || [],
+        charges: chargesData.map((c) => ({
+          id: c.id,
+          status: c.status,
+          paid: c.paid,
+          amount: c.amount,
+          created: c.created,
+          currency: c.currency
+        })),
       },
-      sessions: sessionMetrics.slice(0, 40),
-      updated_at: new Date().toISOString(),
+      meta: {
+        orgId,
+        days,
+        fx_used: USD_MXN
+      }
     });
-  } catch (e) {
-    return json({ ok: false, error: String(e?.message || e) }, 500);
+
+  } catch (error) {
+    console.error("Critical Route Error:", error);
+    return json({ ok: false, error: "Internal Server Error" }, 500);
   }
 }
