@@ -35,6 +35,9 @@ export async function GET() {
       { status: 200, headers: { "Cache-Control": "no-store" } }
     );
   } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: String(e?.message || e) },
+      { status: 500 }
+    );
   }
 }
