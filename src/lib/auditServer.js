@@ -2,7 +2,8 @@
 export async function writeAudit(sb, payload) {
   try {
     const row = {
-      organization_id: payload.organization_id,
+      org_id: payload.org_id || payload.organization_id || null,
+      organization_id: payload.organization_id || payload.org_id || null,
       actor_email: payload.actor_email || null,
       actor_user_id: payload.actor_user_id || null,
       action: payload.action,
@@ -18,9 +19,8 @@ export async function writeAudit(sb, payload) {
 
     if (!row.organization_id || !row.action) return;
 
-    // si audit_log no existe aún, no rompemos el flujo
     await sb.from("audit_log").insert(row);
   } catch {
-    // silence (no rompemos producción por auditoría)
+    // no romper flujo principal
   }
 }
