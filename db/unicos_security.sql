@@ -1,7 +1,3 @@
--- =========================================================
--- UNICOS ADMIN - SECURITY & STORAGE PATCH v2026-02-26
--- =========================================================
-
 BEGIN;
 
 INSERT INTO storage.buckets (id, name, public)
@@ -27,6 +23,7 @@ ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.site_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.shipping_labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.shipping_webhooks ENABLE ROW LEVEL SECURITY;
 
@@ -44,7 +41,7 @@ USING (
       AND (
         (a.user_id IS NOT NULL AND a.user_id = auth.uid())
         OR
-        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
@@ -57,7 +54,7 @@ TO authenticated
 USING (
   (user_id IS NOT NULL AND user_id = auth.uid())
   OR
-  (email IS NOT NULL AND lower(trim(email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+  (email IS NOT NULL AND lower(trim(email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
   OR
   EXISTS (
     SELECT 1
@@ -68,7 +65,7 @@ USING (
       AND (
         (me.user_id IS NOT NULL AND me.user_id = auth.uid())
         OR
-        (me.email IS NOT NULL AND lower(trim(me.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (me.email IS NOT NULL AND lower(trim(me.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
@@ -82,12 +79,12 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.admin_users a
-    WHERE a.organization_id = orders.organization_id
+    WHERE a.organization_id = COALESCE(orders.org_id, orders.organization_id)
       AND a.is_active = true
       AND (
         (a.user_id IS NOT NULL AND a.user_id = auth.uid())
         OR
-        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
@@ -106,6 +103,26 @@ FOR SELECT
 TO anon, authenticated
 USING (deleted_at IS NULL);
 
+DROP POLICY IF EXISTS "UnicOs lee audit_log" ON public.audit_log;
+CREATE POLICY "UnicOs lee audit_log"
+ON public.audit_log
+FOR SELECT
+TO authenticated
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.admin_users a
+    WHERE a.organization_id = COALESCE(audit_log.org_id, audit_log.organization_id)
+      AND a.is_active = true
+      AND a.role IN ('owner','admin')
+      AND (
+        (a.user_id IS NOT NULL AND a.user_id = auth.uid())
+        OR
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
+      )
+  )
+);
+
 DROP POLICY IF EXISTS "UnicOs lee envios" ON public.shipping_labels;
 CREATE POLICY "UnicOs lee envios"
 ON public.shipping_labels
@@ -115,12 +132,12 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.admin_users a
-    WHERE a.organization_id = shipping_labels.org_id
+    WHERE a.organization_id = COALESCE(shipping_labels.org_id, shipping_labels.organization_id)
       AND a.is_active = true
       AND (
         (a.user_id IS NOT NULL AND a.user_id = auth.uid())
         OR
-        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
@@ -134,13 +151,13 @@ WITH CHECK (
   EXISTS (
     SELECT 1
     FROM public.admin_users a
-    WHERE a.organization_id = site_settings.organization_id
+    WHERE a.organization_id = COALESCE(site_settings.org_id, site_settings.organization_id)
       AND a.role IN ('owner','admin','marketing')
       AND a.is_active = true
       AND (
         (a.user_id IS NOT NULL AND a.user_id = auth.uid())
         OR
-        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
@@ -154,13 +171,13 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.admin_users a
-    WHERE a.organization_id = site_settings.organization_id
+    WHERE a.organization_id = COALESCE(site_settings.org_id, site_settings.organization_id)
       AND a.role IN ('owner','admin','marketing')
       AND a.is_active = true
       AND (
         (a.user_id IS NOT NULL AND a.user_id = auth.uid())
         OR
-        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
@@ -180,7 +197,7 @@ USING (
       AND (
         (a.user_id IS NOT NULL AND a.user_id = auth.uid())
         OR
-        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
@@ -194,13 +211,13 @@ WITH CHECK (
   EXISTS (
     SELECT 1
     FROM public.admin_users a
-    WHERE a.organization_id = products.organization_id
+    WHERE a.organization_id = COALESCE(products.org_id, products.organization_id)
       AND a.role IN ('owner','admin','ops')
       AND a.is_active = true
       AND (
         (a.user_id IS NOT NULL AND a.user_id = auth.uid())
         OR
-        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
@@ -214,13 +231,13 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.admin_users a
-    WHERE a.organization_id = products.organization_id
+    WHERE a.organization_id = COALESCE(products.org_id, products.organization_id)
       AND a.role IN ('owner','admin','ops')
       AND a.is_active = true
       AND (
         (a.user_id IS NOT NULL AND a.user_id = auth.uid())
         OR
-        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email','')))
+        (a.email IS NOT NULL AND lower(trim(a.email)) = lower(coalesce(auth.jwt()->>'email', auth.jwt()->'user_metadata'->>'email', '')))
       )
   )
 );
