@@ -100,8 +100,8 @@ function HealthBadge({ label, status }) {
     warn: "unicos-badge-warn",
     bad: "unicos-badge-bad",
   };
-  const text = status === "ok" ? "Listo" : status === "warn" ? "Revisar" : "Atención";
-  return (
+<
+  return (<<
     <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
       <span className="text-sm font-bold text-slate-200">{label}</span>
       <span className={map[status] || map.warn}>{text}</span>
@@ -899,7 +899,7 @@ export default function HomePage() {
 
       if (error) throw error;
 
-      alert(`Listo. Te envié un acceso seguro a ${emailToLogin}. Revisa tu bandeja o SPAM.`);
+      setGlobalError(`Listo. Te envié un acceso seguro a ${emailToLogin}. Revisa tu bandeja o SPAM.`);
     } catch (e) {
       setGlobalError(String(e?.message || e));
     } finally {
