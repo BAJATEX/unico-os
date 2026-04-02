@@ -1,3 +1,4 @@
+// src/app/page.js
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,6 +22,14 @@ import {
   Store,
   Truck,
   Wand2,
+  X,
+  Sparkles,
+  ChevronDown,
+  History,
+  Search,
+  Send,
+  RefreshCcw as RefreshIcon,
+  AlertTriangle,
 } from "lucide-react";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 
@@ -101,8 +110,7 @@ function HealthBadge({ label, status }) {
     bad: "unicos-badge-bad",
   };
 
-  const text =
-    status === "ok" ? "Listo" : status === "warn" ? "Revisar" : "Atención";
+  const text = status === "ok" ? "Listo" : status === "warn" ? "Revisar" : "Atención";
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
@@ -112,15 +120,12 @@ function HealthBadge({ label, status }) {
   );
 }
 
-// 🔥 MEJORA UX: Formulario Nativo en lugar de window.prompt
 function LoginScreen({ onLogin, loading, error }) {
   const [email, setEmail] = useState("");
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (email.trim()) {
-      onLogin(email.trim());
-    }
+    if (email.trim()) onLogin(email.trim());
   };
 
   return (
@@ -135,10 +140,19 @@ function LoginScreen({ onLogin, loading, error }) {
               <div className="relative max-w-2xl animate-unicos-slide-up">
                 <div className="flex items-center gap-4">
                   <div className="unicos-brand-frame relative h-20 w-20 p-3 animate-unicos-float">
-                    <Image src="/logo-unico.png" alt="UnicOs" fill className="object-contain p-2 rounded-[20px]" sizes="80px" priority />
+                    <Image
+                      src="/logo-unico.png"
+                      alt="UnicOs"
+                      fill
+                      className="object-contain p-2 rounded-[20px]"
+                      sizes="80px"
+                      priority
+                    />
                   </div>
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.24em] text-cyan-300">Centro de mando</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.24em] text-cyan-300">
+                      Centro de mando
+                    </p>
                     <h1 className="mt-1 text-4xl md:text-5xl font-black leading-none">
                       <span className="unicos-blue-text">UnicOs</span>
                     </h1>
@@ -150,8 +164,7 @@ function LoginScreen({ onLogin, loading, error }) {
                 </h2>
 
                 <p className="mt-5 max-w-xl text-sm md:text-[15px] leading-relaxed text-slate-300">
-                  UnicOs está diseñado para coordinar tiendas, campañas, contenido, atención, seguimiento y operación
-                  diaria sin depender del equipo técnico para cada ajuste.
+                  UnicOs coordina tiendas, campañas, contenido, atención y operación diaria sin depender del equipo técnico para cada ajuste.
                 </p>
 
                 <div className="mt-8 flex flex-wrap gap-2">
@@ -162,53 +175,57 @@ function LoginScreen({ onLogin, loading, error }) {
               </div>
             </div>
 
-            <div className="p-8 md:p-12 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] border-l border-white/10 flex items-center">
-              <div className="mx-auto w-full max-w-md animate-unicos-slide-up">
-                <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 md:p-8 shadow-2xl backdrop-blur-xl">
-                  <p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-300">Acceso seguro</p>
-                  <h3 className="mt-2 text-2xl font-black text-white">Entrar al panel maestro</h3>
-                  <p className="mt-3 mb-6 text-sm leading-relaxed text-slate-300">
-                    Recibe un enlace mágico en tu correo y entra directo al panel.
-                  </p>
+            <div className="p-8 md:p-12 border-t border-white/10 lg:border-t-0 lg:border-l lg:border-white/10 bg-[rgba(255,255,255,0.02)]">
+              <div className="mb-8">
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">
+                  Acceso al panel
+                </p>
+                <h3 className="mt-2 text-3xl font-black text-white">Ingresa con tu correo</h3>
+                <p className="mt-3 text-sm leading-relaxed text-slate-300">
+                  Se enviará un enlace seguro al correo autorizado.
+                </p>
+              </div>
 
-                  {error ? (
-                    <div className="mb-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200">
-                      {error}
-                    </div>
-                  ) : null}
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <label className="block">
+                  <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+                    Correo
+                  </span>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="correo@empresa.com"
+                    className="unicos-input w-full rounded-2xl px-4 py-4 text-sm outline-none"
+                  />
+                </label>
 
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                      <label htmlFor="email" className="unicos-label">Correo Electrónico</label>
-                      <input 
-                        id="email"
-                        type="email" 
-                        required
-                        disabled={loading}
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="tu@correo.com" 
-                        className="unicos-input bg-black/20"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={loading || !email}
-                      className={cls(
-                        "w-full unicos-btn px-4 py-4 text-sm text-white transition-all flex justify-center items-center gap-2",
-                        loading || !email
-                          ? "bg-white/10 border border-white/10 opacity-70"
-                          : "bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 shadow-[0_18px_50px_rgba(42,168,255,0.28)]"
-                      )}
-                    >
-                      {loading ? <Loader2 className="animate-spin" size={18} /> : "Recibir acceso por correo"}
-                    </button>
-                  </form>
+                {error ? (
+                  <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                    {error}
+                  </div>
+                ) : null}
 
-                  <p className="mt-5 text-xs leading-relaxed text-slate-400 text-center">
-                    El sistema detectará automáticamente tu perfil y te dará acceso a las áreas correspondientes.
-                  </p>
-                </div>
+                <button
+                  type="submit"
+                  disabled={loading || !email.trim()}
+                  className={cls(
+                    "w-full rounded-2xl px-5 py-4 text-sm font-black transition flex items-center justify-center gap-2",
+                    loading || !email.trim()
+                      ? "bg-white/10 border border-white/10 text-white/50 cursor-not-allowed"
+                      : "bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 text-slate-950 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
+                  )}
+                >
+                  {loading ? <Loader2 className="animate-spin" size={18} /> : null}
+                  {loading ? "Enviando..." : "Enviar acceso"}
+                </button>
+              </form>
+
+              <div className="mt-6 grid gap-3">
+                <HealthBadge label="Instancia" status="ok" />
+                <HealthBadge label="Sesión" status="warn" />
+                <HealthBadge label="Permisos" status="warn" />
               </div>
             </div>
           </div>
@@ -218,164 +235,27 @@ function LoginScreen({ onLogin, loading, error }) {
   );
 }
 
-function FinanceSummary({ token, orgId, role }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [data, setData] = useState(null);
-
-  const canView = ["owner", "admin", "marketing"].includes(safeStr(role).toLowerCase());
-
-  const load = useCallback(async () => {
-    if (!token || !orgId || !canView) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-
-      const res = await fetch(`/api/stripe/summary?org_id=${encodeURIComponent(orgId)}&days=30`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok || !payload?.ok) throw new Error(payload?.error || "No se pudo leer el resumen financiero.");
-
-      setData(payload);
-    } catch (e) {
-      setError(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }, [token, orgId, canView]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (!canView) return null;
-
-  if (loading) {
-    return (
-      <Panel className="p-6">
-        <div className="flex items-center gap-3 text-slate-300">
-          <Loader2 className="animate-spin" size={18} />
-          <span className="font-semibold">Cargando resumen ejecutivo...</span>
-        </div>
-      </Panel>
-    );
-  }
-
-  if (error) {
-    return (
-      <Panel className="p-6">
-        <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm font-semibold text-rose-200">
-          {error}
-        </div>
-      </Panel>
-    );
-  }
-
-  const kpi = data?.kpi || {};
-
+function OrgCard({ active, onClick, name, description, icon }) {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <MetricCard
-        icon={<CircleDollarSign size={20} />}
-        label="Ventas"
-        value={money(kpi.sales_mxn)}
-        hint="Últimos 30 días"
-      />
-      <MetricCard
-        icon={<BarChart3 size={20} />}
-        label="Comisión cobros"
-        value={money(kpi.stripe_fee_mxn)}
-        hint="Cobro de pagos"
-      />
-      <MetricCard
-        icon={<Truck size={20} />}
-        label="Costo envíos"
-        value={money(kpi.envia_cost_mxn)}
-        hint="Costo operativo"
-      />
-      <MetricCard
-        icon={<Gauge size={20} />}
-        label="Ganancia"
-        value={money(kpi.visible_profit_mxn)}
-        hint="Vista simple"
-      />
-    </div>
-  );
-}
-
-function HealthSummary({ token }) {
-  const [status, setStatus] = useState({
-    auth: "warn",
-    stripe: "warn",
-    db: "warn",
-    envia: "warn",
-    ia: "warn",
-  });
-
-  const load = useCallback(async () => {
-    if (!token) return;
-
-    try {
-      const res = await fetch("/api/bootstrap", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data?.ok) throw new Error();
-
-      setStatus({
-        auth: "ok",
-        stripe: data?.health?.stripe ? "ok" : "warn",
-        db: data?.health?.supabase ? "ok" : "warn",
-        envia: data?.health?.envia ? "ok" : "warn",
-        ia: data?.health?.ia ? "ok" : "warn",
-      });
-    } catch {
-      setStatus({
-        auth: "ok",
-        stripe: "warn",
-        db: "warn",
-        envia: "warn",
-        ia: "warn",
-      });
-    }
-  }, [token]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return (
-    <Panel className="p-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Salud del panel</p>
-          <h3 className="mt-2 text-xl font-black text-white">Conexiones principales</h3>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cls(
+        "w-full rounded-3xl border p-5 text-left transition",
+        active
+          ? "border-sky-400/40 bg-sky-500/10 shadow-[0_18px_50px_rgba(42,168,255,0.18)]"
+          : "border-white/10 bg-white/5 hover:bg-white/10"
+      )}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sky-200">
+          {icon}
         </div>
-        <button
-          type="button"
-          onClick={load}
-          className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white hover:bg-white/10"
-        >
-          <RefreshCcw size={16} />
-          Actualizar
-        </button>
+        {active ? <StatusPill ok tone="blue">Activa</StatusPill> : null}
       </div>
-
-      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <HealthBadge label="Acceso" status={status.auth} />
-        <HealthBadge label="Cobros" status={status.stripe} />
-        <HealthBadge label="Base de datos" status={status.db} />
-        <HealthBadge label="Envíos" status={status.envia} />
-        <HealthBadge label="Asistente" status={status.ia} />
-      </div>
-    </Panel>
+      <h4 className="mt-4 text-lg font-black text-white">{name}</h4>
+      <p className="mt-2 text-sm leading-relaxed text-slate-300">{description}</p>
+    </button>
   );
 }
 
@@ -384,36 +264,41 @@ function AIQuickActions({ token, orgId, role }) {
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState("");
 
-  const run = useCallback(async (msg) => {
-    if (!token || !orgId || !msg) return;
-    try {
-      setLoading(true);
-      setAnswer("");
+  const canUse = ["owner", "admin", "marketing", "support", "operations", "ops"].includes(
+    safeStr(role).toLowerCase()
+  );
 
-      const res = await fetch("/api/ai", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: msg,
-          org_id: orgId,
-        }),
-      });
+  const run = useCallback(
+    async (msg) => {
+      if (!token || !orgId || !msg) return;
+      try {
+        setLoading(true);
+        setAnswer("");
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || "No pude completar la solicitud.");
+        const res = await fetch("/api/ai", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: String(msg).trim().slice(0, 1200),
+            org_id: orgId,
+          }),
+        });
 
-      setAnswer(data.reply || "Listo.");
-    } catch (e) {
-      setAnswer(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }, [token, orgId]);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.ok) throw new Error(data?.error || "No pude completar la solicitud.");
 
-  const canUse = ["owner", "admin", "marketing", "support", "operations"].includes(safeStr(role).toLowerCase());
+        setAnswer(data.reply || "Listo.");
+      } catch (e) {
+        setAnswer(String(e?.message || e));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token, orgId]
+  );
 
   if (!canUse) return null;
 
@@ -483,27 +368,149 @@ function AIQuickActions({ token, orgId, role }) {
   );
 }
 
-function OrgCard({ active, onClick, name, description, icon }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cls(
-        "w-full rounded-3xl border p-5 text-left transition",
-        active
-          ? "border-sky-400/40 bg-sky-500/10 shadow-[0_18px_50px_rgba(42,168,255,0.18)]"
-          : "border-white/10 bg-white/5 hover:bg-white/10"
-      )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sky-200">
-          {icon}
+function FinanceSummary({ token, orgId, role }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [data, setData] = useState(null);
+
+  const canView = ["owner", "admin", "marketing"].includes(safeStr(role).toLowerCase());
+
+  const load = useCallback(async () => {
+    if (!token || !orgId || !canView) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+
+      const res = await fetch(`/api/stripe/summary?org_id=${encodeURIComponent(orgId)}&days=30`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload?.ok) throw new Error(payload?.error || "No se pudo leer el resumen financiero.");
+
+      setData(payload);
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }, [token, orgId, canView]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (!canView) return null;
+
+  if (loading) {
+    return (
+      <Panel className="p-6">
+        <div className="flex items-center gap-3 text-slate-300">
+          <Loader2 className="animate-spin" size={18} />
+          <span className="font-semibold">Cargando resumen ejecutivo...</span>
         </div>
-        {active ? <StatusPill ok tone="blue">Activa</StatusPill> : null}
+      </Panel>
+    );
+  }
+
+  if (error) {
+    return (
+      <Panel className="p-6">
+        <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm font-semibold text-rose-200">
+          {error}
+        </div>
+      </Panel>
+    );
+  }
+
+  const kpi = data?.kpi || {};
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <MetricCard icon={<CircleDollarSign size={20} />} label="Ventas" value={money(kpi.sales_mxn)} hint="Últimos 30 días" />
+      <MetricCard icon={<BarChart3 size={20} />} label="Comisión cobros" value={money(kpi.stripe_fee_mxn)} hint="Cobro de pagos" />
+      <MetricCard icon={<Truck size={20} />} label="Costo envíos" value={money(kpi.envia_cost_mxn)} hint="Costo operativo" />
+      <MetricCard icon={<Gauge size={20} />} label="Ganancia" value={money(kpi.visible_profit_mxn)} hint="Vista simple" />
+    </div>
+  );
+}
+
+function HealthSummary({ token }) {
+  const [status, setStatus] = useState({
+    auth: "warn",
+    stripe: "warn",
+    db: "warn",
+    envia: "warn",
+    ia: "warn",
+  });
+
+  const load = useCallback(async () => {
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/bootstrap", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) throw new Error();
+
+      setStatus({
+        auth: data?.checks?.auth ? "ok" : "warn",
+        stripe: data?.checks?.stripe ? "ok" : "warn",
+        db: data?.checks?.db ? "ok" : "warn",
+        envia: data?.checks?.envia ? "ok" : "warn",
+        ia: data?.checks?.ia ? "ok" : "warn",
+      });
+    } catch {
+      setStatus({
+        auth: "bad",
+        stripe: "bad",
+        db: "bad",
+        envia: "bad",
+        ia: "bad",
+      });
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <Panel className="p-5">
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-emerald-200">
+          <ShieldCheck size={20} />
+        </div>
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Estado</p>
+          <h3 className="mt-1 text-xl font-black text-white">Salud del sistema</h3>
+        </div>
       </div>
-      <h4 className="mt-4 text-lg font-black text-white">{name}</h4>
-      <p className="mt-2 text-sm leading-relaxed text-slate-300">{description}</p>
-    </button>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <HealthBadge label="Auth" status={status.auth} />
+        <HealthBadge label="Stripe" status={status.stripe} />
+        <HealthBadge label="DB" status={status.db} />
+        <HealthBadge label="Envía" status={status.envia} />
+        <HealthBadge label="IA" status={status.ia} />
+      </div>
+
+      <div className="mt-5 flex justify-end">
+        <button
+          type="button"
+          onClick={load}
+          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white hover:bg-white/10"
+        >
+          <RefreshCcw size={16} />
+          Revalidar
+        </button>
+      </div>
+    </Panel>
   );
 }
 
@@ -537,15 +544,18 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
           .limit(50),
         fetch(`/api/audit/list?org_id=${encodeURIComponent(orgId)}&limit=10`, {
           headers: { Authorization: `Bearer ${token}` },
-        }).then((r) => r.json().catch(() => ({}))),
+        }),
       ]);
+
+      const auditData = await auditRes.json().catch(() => ({}));
 
       if (ordersRes.error) throw ordersRes.error;
       if (productsRes.error) throw productsRes.error;
+      if (!auditRes.ok || !auditData?.ok) throw new Error(auditData?.error || "No se pudo leer auditoría.");
 
-      setOrders(Array.isArray(ordersRes.data) ? ordersRes.data : []);
-      setProducts(Array.isArray(productsRes.data) ? productsRes.data : []);
-      setAuditRows(Array.isArray(auditRes?.rows) ? auditRes.rows : []);
+      setOrders(ordersRes.data || []);
+      setProducts(productsRes.data || []);
+      setAuditRows(Array.isArray(auditData.rows) ? auditData.rows : []);
     } catch (e) {
       setError(String(e?.message || e));
     } finally {
@@ -557,95 +567,75 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
     load();
   }, [load]);
 
+  const activeProducts = useMemo(
+    () => (products || []).filter((p) => p?.is_active !== false),
+    [products]
+  );
+
   const paidOrders = useMemo(
-    () => orders.filter((o) => ["paid", "fulfilled"].includes(safeStr(o.status).toLowerCase())),
+    () =>
+      (orders || []).filter((o) => {
+        const status = safeStr(o?.status || "").toLowerCase();
+        return status === "paid" || status === "fulfilled" || safeStr(o?.payment_status).toLowerCase() === "paid";
+      }),
     [orders]
   );
 
   const pendingOrders = useMemo(
-    () => orders.filter((o) => !["paid", "fulfilled"].includes(safeStr(o.status).toLowerCase())),
+    () =>
+      (orders || []).filter((o) => {
+        const status = safeStr(o?.status || "").toLowerCase();
+        return ["pending", "pending_payment", "payment_failed"].includes(status);
+      }),
     [orders]
   );
 
-  const activeProducts = useMemo(
-    () => products.filter((p) => p?.is_active !== false),
-    [products]
-  );
-
-  // URL dinámica hacia Vercel
   const scoreStoreUrl = process.env.NEXT_PUBLIC_SCORESTORE_URL || "https://scorestore.vercel.app";
 
   return (
-    <main className="min-h-screen px-4 py-6 md:py-8 unicos-shell">
-      <div className="unicos-wrap space-y-5 animate-unicos-slide-up">
-        <Panel className="overflow-hidden">
-          <div className="relative p-6 md:p-8">
-            <div className="unicos-orb unicos-orb-blue h-40 w-40 right-[-20px] top-[-20px]" />
-            <div className="unicos-orb unicos-orb-teal h-32 w-32 left-[20%] bottom-[-10px]" />
+    <main className="min-h-screen px-4 py-6 unicos-shell">
+      <div className="unicos-wrap mx-auto w-full max-w-7xl space-y-5">
+        <Panel className="p-5">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-[11px] font-black uppercase tracking-[0.22em] text-sky-300">
+                UnicOs Control Center
+              </p>
+              <h1 className="mt-2 text-3xl md:text-4xl font-black leading-tight text-white">
+                {orgName || "Score Store"} · Panel operativo
+              </h1>
+              <p className="mt-3 text-sm leading-relaxed text-slate-300">
+                Resumen de ventas, pedidos, catálogo, salud del sistema y acciones rápidas con IA.
+              </p>
+            </div>
 
-            <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-              <div className="max-w-3xl">
-                <div className="flex items-center gap-4">
-                  <div className="unicos-brand-frame relative h-16 w-16 p-2.5">
-                    <Image src="/logo-unico.png" alt="UnicOs" fill className="object-contain p-1.5 rounded-[18px]" sizes="64px" priority />
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.22em] text-sky-300">Centro de mando activo</p>
-                    <h1 className="mt-1 text-3xl md:text-4xl font-black leading-none text-white">
-                      Bienvenido a <span className="unicos-blue-text">UnicOs</span>
-                    </h1>
-                  </div>
-                </div>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={onGoSettings}
+                className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 px-4 py-3 text-sm text-slate-950 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
+              >
+                <Settings2 size={16} />
+                Abrir configuración
+              </button>
 
-                <p className="mt-5 max-w-2xl text-sm md:text-[15px] leading-relaxed text-slate-300">
-                  Administra operación, contenido, campañas, seguimiento y rendimiento desde un panel visual,
-                  conectado y entendible para el equipo.
-                </p>
+              <a
+                href={scoreStoreUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
+              >
+                <ExternalLink size={16} />
+                Ver sitio público
+              </a>
 
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <StatusPill ok tone="blue">Producción conectada</StatusPill>
-                  <StatusPill ok tone="emerald">{safeStr(orgName || "Organización activa")}</StatusPill>
-                  <StatusPill ok tone="blue">{safeStr(role || "Perfil")}</StatusPill>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[420px]">
-                <button
-                  type="button"
-                  onClick={load}
-                  className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
-                >
-                  <RefreshCcw size={16} />
-                  Actualizar datos
-                </button>
-
-                <button
-                  type="button"
-                  onClick={onGoSettings}
-                  className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 px-4 py-3 text-sm text-slate-950 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
-                >
-                  <Settings2 size={16} />
-                  Abrir configuración
-                </button>
-
-                <a
-                  href={scoreStoreUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
-                >
-                  <ExternalLink size={16} />
-                  Ver sitio público
-                </a>
-
-                <a
-                  href="#panel-ia"
-                  className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
-                >
-                  <Wand2 size={16} />
-                  Usar asistente
-                </a>
-              </div>
+              <a
+                href="#panel-ia"
+                className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
+              >
+                <Wand2 size={16} />
+                Usar asistente
+              </a>
             </div>
           </div>
         </Panel>
@@ -696,64 +686,56 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
           <Panel className="p-5">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Seguimiento</p>
-                <h3 className="mt-2 text-xl font-black text-white">Últimos pedidos</h3>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Operación</p>
+                <h3 className="mt-1 text-xl font-black text-white">Pedidos recientes</h3>
               </div>
               <button
                 type="button"
                 onClick={load}
-                className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white hover:bg-white/10"
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white hover:bg-white/10"
               >
                 <RefreshCcw size={16} />
-                Refrescar
+                Recargar
               </button>
             </div>
 
             {loading ? (
               <div className="mt-5 flex items-center gap-3 text-slate-300">
                 <Loader2 className="animate-spin" size={18} />
-                <span className="font-semibold">Cargando pedidos...</span>
+                <span className="font-semibold">Cargando datos...</span>
               </div>
             ) : error ? (
               <div className="mt-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm font-semibold text-rose-200">
                 {error}
               </div>
             ) : (
-              <div className="mt-5 overflow-hidden rounded-3xl border border-white/10">
-                <div className="grid grid-cols-[1.15fr_.75fr_.8fr_.7fr] gap-3 bg-white/5 px-4 py-3 text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
-                  <div>Pedido</div>
-                  <div>Fecha</div>
-                  <div>Total</div>
-                  <div>Estado</div>
-                </div>
-
-                <div className="divide-y divide-white/10">
-                  {(orders || []).slice(0, 10).map((row) => (
-                    <div key={row.id} className="grid grid-cols-[1.15fr_.75fr_.8fr_.7fr] gap-3 px-4 py-3 text-sm hover:bg-white/5 transition-colors">
-                      <div className="font-bold text-white">{safeStr(row.stripe_session_id || row.id)}</div>
-                      <div className="text-slate-300">{dateTime(row.created_at)}</div>
-                      <div className="text-slate-200 font-bold">{money(row.amount_total_mxn)}</div>
+              <div className="mt-5 space-y-3">
+                {(orders || []).slice(0, 8).map((o) => (
+                  <div
+                    key={o.id}
+                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 hover:bg-white/10 transition-colors"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <span
-                          className={cls(
-                            "inline-flex rounded-full px-3 py-1 text-[11px] font-black",
-                            ["paid", "fulfilled"].includes(safeStr(row.status).toLowerCase())
-                              ? "bg-emerald-500/14 text-emerald-100 border border-emerald-400/20"
-                              : "bg-amber-500/14 text-amber-100 border border-amber-400/20"
-                          )}
-                        >
-                          {safeStr(row.status || "pendiente")}
-                        </span>
+                        <p className="text-sm font-black text-white">
+                          {safeStr(o.id).slice(0, 8)} · {safeStr(o.status || "pending")}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {dateTime(o.created_at)} · {safeStr(o.stripe_session_id || "sin session")}
+                        </p>
+                      </div>
+                      <div className="text-sm font-black text-white">
+                        {money(o.amount_total_mxn)}
                       </div>
                     </div>
-                  ))}
+                  </div>
+                ))}
 
-                  {!orders.length ? (
-                    <div className="px-4 py-6 text-sm text-slate-300">
-                      Todavía no hay pedidos visibles para esta organización.
-                    </div>
-                  ) : null}
-                </div>
+                {!orders.length ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-sm text-slate-300">
+                    Todavía no hay pedidos visibles para esta organización.
+                  </div>
+                ) : null}
               </div>
             )}
           </Panel>
@@ -771,7 +753,10 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
 
             <div className="mt-5 space-y-3">
               {(auditRows || []).slice(0, 8).map((row) => (
-                <div key={row.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 hover:bg-white/10 transition-colors">
+                <div
+                  key={row.id}
+                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 hover:bg-white/10 transition-colors"
+                >
                   <p className="text-sm font-black text-white">{safeStr(row.summary || row.action)}</p>
                   <div className="mt-1 flex items-center justify-between gap-3 text-xs text-slate-400">
                     <span>{safeStr(row.actor_email || "Sistema")}</span>
@@ -887,11 +872,10 @@ export default function HomePage() {
       setAuthLoading(true);
       setGlobalError("");
 
-      // Dinamismo para Vercel
       const origin =
         typeof window !== "undefined" && window.location?.origin
           ? window.location.origin
-          : (process.env.NEXT_PUBLIC_SITE_URL || "https://unicos-admin.vercel.app");
+          : process.env.NEXT_PUBLIC_SITE_URL || "https://unicos-admin.vercel.app";
 
       const { error } = await supabase.auth.signInWithOtp({
         email: emailToLogin,
@@ -937,9 +921,17 @@ export default function HomePage() {
         <div className="unicos-wrap w-full max-w-2xl">
           <Panel className="p-8 text-center animate-unicos-slide-up">
             <div className="mx-auto mb-5 h-20 w-20 unicos-brand-frame p-3">
-              <Image src="/logo-unico.png" alt="UnicOs" width={80} height={80} className="h-full w-full object-contain rounded-[18px]" />
+              <Image
+                src="/logo-unico.png"
+                alt="UnicOs"
+                width={80}
+                height={80}
+                className="h-full w-full object-contain rounded-[18px]"
+              />
             </div>
-            <p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-300">Configuración pendiente</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-300">
+              Configuración pendiente
+            </p>
             <h1 className="mt-3 text-3xl font-black text-white">UnicOs no está conectado</h1>
             <p className="mt-4 text-sm leading-relaxed text-slate-300">
               Falta conectar las llaves públicas del panel para iniciar sesión desde este entorno de Vercel.
@@ -961,7 +953,9 @@ export default function HomePage() {
           <Panel className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Configuración</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                  Configuración
+                </p>
                 <h2 className="mt-2 text-2xl font-black text-white">{orgName || "Ajustes del sitio"}</h2>
               </div>
 
