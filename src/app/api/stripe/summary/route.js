@@ -1,9 +1,12 @@
+// src/app/api/stripe/summary/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
 import { getMyRoleForOrg, isUuid, normEmail } from "@/lib/dbScope";
+import { hasPerm } from "@/lib/authz";
+import { writeAudit } from "@/lib/auditServer";
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || "";
 const USD_MXN = Number(process.env.USD_MXN || process.env.FX_USD_TO_MXN || "18");
@@ -25,8 +28,7 @@ const safeNum = (v, d = 0) => {
 const safeStr = (v, d = "") => (typeof v === "string" ? v : v == null ? d : String(v));
 
 function getBearerToken(req) {
-  const h = req.headers.get("authorization");
-  if (!h) return "";
+  const h = req.headers.get("authorization") || "";
   const m = h.match(/^Bearer\s+(.*)$/i);
   return m ? m[1] : "";
 }
@@ -38,6 +40,85 @@ function fxToMXN(currency) {
   const envKey = `FX_${c.toUpperCase()}_TO_MXN`;
   const fx = Number(process.env[envKey] || NaN);
   return Number.isFinite(fx) && fx > 0 ? fx : 1;
+}
+
+function isRowActive(row) {
+  return row?.deleted_at == null;
+}
+
+function normalizeMoneyRow(row) {
+  const amountCents =
+    safeNum(row?.amount_total_cents, NaN) ||
+    safeNum(row?.total_cents, NaN) ||
+    safeNum(row?.subtotal_cents, NaN) ||
+    0;
+
+  const shippingCents =
+    safeNum(row?.amount_shipping_cents, NaN) ||
+    safeNum(row?.shipping_cents, NaN) ||
+    0;
+
+  const discountCents =
+    safeNum(row?.amount_discount_cents, NaN) ||
+    safeNum(row?.discount_cents, NaN) ||
+    0;
+
+  return {
+    amount_cents: Math.max(0, Math.round(amountCents)),
+    shipping_cents: Math.max(0, Math.round(shippingCents)),
+    discount_cents: Math.max(0, Math.round(discountCents)),
+  };
+}
+
+function orderMoney(row) {
+  const cents = normalizeMoneyRow(row).amount_cents;
+  if (cents > 0) return cents / 100;
+
+  const mxn =
+    safeNum(row?.amount_total_mxn, NaN) ||
+    safeNum(row?.total_mxn, NaN) ||
+    safeNum(row?.subtotal_mxn, NaN) ||
+    0;
+
+  return Number.isFinite(mxn) ? mxn : 0;
+}
+
+function shippingMoney(row) {
+  const { shipping_cents } = normalizeMoneyRow(row);
+  if (shipping_cents > 0) return shipping_cents / 100;
+  return safeNum(row?.envia_cost_mxn, 0);
+}
+
+function enviaMoney(row) {
+  return safeNum(row?.envia_cost_mxn, 0);
+}
+
+function refundedMxn(charge) {
+  if (!charge) return 0;
+
+  const refunded = Boolean(charge?.refunded);
+  const amount = safeNum(charge?.amount, 0) / 100;
+
+  if (!refunded) return 0;
+
+  const refunds = Array.isArray(charge?.refunds?.data) ? charge.refunds.data : [];
+  if (refunds.length) {
+    return refunds.reduce((acc, r) => acc + safeNum(r?.amount, 0) / 100, 0);
+  }
+
+  return amount;
+}
+
+function chargeFeeMxn(charge) {
+  const bt = charge?.balance_transaction;
+  const btObj = typeof bt === "object" && bt ? bt : null;
+  const feeCents = safeNum(btObj?.fee, NaN) || safeNum(charge?.application_fee_amount, NaN) || 0;
+  const feeCurrency = String(btObj?.currency || charge?.currency || "mxn").toLowerCase();
+  return (Math.max(0, feeCents) / 100) * fxToMXN(feeCurrency);
+}
+
+function getBearerTokenFromReq(req) {
+  return getBearerToken(req);
 }
 
 async function fetchStripe(path, query = {}) {
@@ -62,171 +143,358 @@ async function fetchStripe(path, query = {}) {
     });
 
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return null;
+    if (!res.ok) {
+      throw new Error(String(data?.error?.message || `Stripe error (${res.status})`));
+    }
     return data;
-  } catch {
-    return null;
+  } catch (e) {
+    return { error: String(e?.message || e) };
   }
 }
 
-function orderMoney(row) {
-  return (
-    safeNum(row?.amount_total_mxn, NaN) ||
-    safeNum(row?.total_amount_mxn, NaN) ||
-    safeNum(row?.total_cents, NaN) / 100 ||
-    safeNum(row?.amount_total_cents, NaN) / 100 ||
-    safeNum(row?.total_amount, NaN)
+async function resolveOrgId(sb, explicitOrgId = "") {
+  const explicit = safeStr(explicitOrgId).trim();
+  if (isUuid(explicit)) return explicit;
+
+  const envId = safeStr(process.env.SCORE_ORG_ID || process.env.DEFAULT_ORG_ID || "").trim();
+  if (isUuid(envId)) return envId;
+
+  try {
+    const { data: bySlug } = await sb
+      .from("organizations")
+      .select("id")
+      .eq("slug", "score-store")
+      .limit(1)
+      .maybeSingle();
+
+    if (bySlug?.id) return bySlug.id;
+
+    const { data: byName } = await sb
+      .from("organizations")
+      .select("id")
+      .ilike("name", "%score%")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (byName?.id) return byName.id;
+
+    const { data: anyOrg } = await sb
+      .from("organizations")
+      .select("id")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (anyOrg?.id) return anyOrg.id;
+  } catch {}
+
+  return "1f3b9980-a1c5-4557-b4eb-a75bb9a8aaa6";
+}
+
+function parseDays(v, fallback = 30) {
+  const n = Math.floor(safeNum(v, fallback));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(365, n));
+}
+
+function normalizeCurrency(value) {
+  return String(value || "mxn").toLowerCase();
+}
+
+async function authorize(req, sb, orgId) {
+  const token = getBearerTokenFromReq(req);
+  const { user, error: authErr } = await requireUserFromToken(sb, token);
+
+  if (authErr || !user) {
+    return { ok: false, res: json({ ok: false, error: "No autorizado" }, 401) };
+  }
+
+  const role = await getMyRoleForOrg(sb, orgId, user);
+  if (!role || !hasPerm(role, "dashboard")) {
+    return { ok: false, res: json({ ok: false, error: "Permisos insuficientes" }, 403) };
+  }
+
+  return { ok: true, user, role };
+}
+
+async function loadOrders(sb, orgId, days) {
+  const limitDate = new Date();
+  limitDate.setDate(limitDate.getDate() - days);
+
+  const q = sb
+    .from("orders")
+    .select(
+      [
+        "id",
+        "org_id",
+        "organization_id",
+        "stripe_session_id",
+        "checkout_session_id",
+        "session_id",
+        "status",
+        "payment_status",
+        "amount_total_cents",
+        "total_cents",
+        "subtotal_cents",
+        "amount_total_mxn",
+        "total_mxn",
+        "subtotal_mxn",
+        "amount_shipping_cents",
+        "shipping_cents",
+        "shipping_total_mxn",
+        "amount_shipping_mxn",
+        "amount_discount_cents",
+        "discount_cents",
+        "amount_discount_mxn",
+        "deleted_at",
+        "created_at",
+        "updated_at",
+        "envia_cost_mxn",
+      ].join(", ")
+    )
+    .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
+    .gte("created_at", limitDate.toISOString())
+    .order("created_at", { ascending: false });
+
+  const { data, error } = await q;
+  if (error) throw new Error(error.message || "No se pudieron cargar pedidos");
+  return Array.isArray(data) ? data.filter(isRowActive) : [];
+}
+
+async function loadShippingLabels(sb, orgId, days) {
+  const limitDate = new Date();
+  limitDate.setDate(limitDate.getDate() - days);
+
+  const q = sb
+    .from("shipping_labels")
+    .select(
+      [
+        "id",
+        "org_id",
+        "organization_id",
+        "status",
+        "shipment_status",
+        "shipping_status",
+        "envia_cost_mxn",
+        "tracking_number",
+        "carrier",
+        "created_at",
+        "updated_at",
+      ].join(", ")
+    )
+    .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
+    .gte("created_at", limitDate.toISOString())
+    .order("created_at", { ascending: false });
+
+  const { data, error } = await q;
+  if (error) throw new Error(error.message || "No se pudieron cargar guías");
+  return Array.isArray(data) ? data : [];
+}
+
+async function loadStripeBalances() {
+  const balance = await fetchStripe("balance");
+  const payouts = await fetchStripe("payouts", { limit: 10 });
+  return {
+    balance,
+    payouts,
+  };
+}
+
+async function loadStripeCharges(sessionIds) {
+  const out = [];
+  for (const sessionId of sessionIds) {
+    try {
+      const session = await fetchStripe(`checkout/sessions/${encodeURIComponent(sessionId)}`, {
+        "expand[]": ["payment_intent.latest_charge.balance_transaction"],
+      });
+
+      if (!session) continue;
+
+      const pi = session?.payment_intent;
+      const piId = typeof pi === "string" ? pi : pi?.id;
+      if (!piId) continue;
+
+      const paymentIntent =
+        typeof pi === "object" && pi
+          ? pi
+          : await fetchStripe(`payment_intents/${encodeURIComponent(piId)}`, {
+              "expand[]": ["latest_charge.balance_transaction"],
+            });
+
+      const latestCharge = paymentIntent?.latest_charge;
+      const chId = typeof latestCharge === "string" ? latestCharge : latestCharge?.id;
+      if (!chId) continue;
+
+      const charge =
+        typeof latestCharge === "object" && latestCharge
+          ? latestCharge
+          : await fetchStripe(`charges/${encodeURIComponent(chId)}`, {
+              "expand[]": ["balance_transaction"],
+            });
+
+      if (charge) out.push(charge);
+    } catch {}
+  }
+  return out;
+}
+
+function uniqueSessionIds(orders) {
+  return Array.from(
+    new Set(
+      (Array.isArray(orders) ? orders : [])
+        .map((o) =>
+          safeStr(
+            o?.stripe_session_id ||
+              o?.checkout_session_id ||
+              o?.session_id ||
+              o?.id
+          ).trim()
+        )
+        .filter(Boolean)
+    )
   );
 }
 
-function shippingMoney(row) {
-  return (
-    safeNum(row?.shipping_total_mxn, NaN) ||
-    safeNum(row?.shipping_cents, NaN) / 100 ||
-    safeNum(row?.shipping_cost, NaN) ||
-    safeNum(row?.shipping_collected_mxn, NaN)
-  );
+function summarizeOrders(orders) {
+  const salesMXN = orders.reduce((acc, row) => acc + safeNum(orderMoney(row), 0), 0);
+  const shippingCollectedMXN = orders.reduce((acc, row) => acc + safeNum(shippingMoney(row), 0), 0);
+  const orderRefundedMXN = orders.reduce((acc, row) => {
+    const st = String(row?.status || row?.payment_status || "").toLowerCase();
+    if (st !== "refunded") return 0;
+    return safeNum(orderMoney(row), 0);
+  }, 0);
+
+  return {
+    salesMXN,
+    shippingCollectedMXN,
+    orderRefundedMXN,
+  };
 }
 
-function enviaMoney(row) {
-  return (
-    safeNum(row?.envia_cost_mxn, NaN) ||
-    safeNum(row?.total_amount_mxn, NaN) ||
-    safeNum(row?.amount_total_mxn, NaN) ||
-    safeNum(row?.total_cents, NaN) / 100 ||
-    safeNum(row?.amount_total_cents, NaN) / 100
-  );
+function summarizeLabels(labels) {
+  const enviaCostMXN = labels.reduce((acc, row) => acc + safeNum(enviaMoney(row), 0), 0);
+  return { enviaCostMXN };
 }
 
-function chargeFeeMxn(charge) {
-  const bt = charge?.balance_transaction;
-  const feeCents =
-    safeNum(bt?.fee, NaN) ||
-    safeNum(charge?.application_fee_amount, NaN) ||
-    safeNum(charge?.fee, NaN) ||
-    0;
+function summarizeCharges(chargesList) {
+  let stripeFeeMXN = 0;
+  let refundedMXN = 0;
+  let disputes = 0;
 
-  const currency = safeStr(bt?.currency || charge?.currency || "mxn").toLowerCase();
-  const fx = fxToMXN(currency);
-  return (feeCents / 100) * fx;
-}
+  for (const c of chargesList) {
+    stripeFeeMXN += chargeFeeMxn(c);
+    refundedMXN += refundedMxn(c);
+    if (c?.disputed) disputes += 1;
+  }
 
-function refundedMxn(charge) {
-  const amountRefundedCents = safeNum(charge?.amount_refunded, 0);
-  const currency = safeStr(charge?.currency || "mxn").toLowerCase();
-  const fx = fxToMXN(currency);
-  return (amountRefundedCents / 100) * fx;
+  return { stripeFeeMXN, refundedMXN, disputes };
 }
 
 export async function GET(req) {
   try {
     const sb = serverSupabase();
-    const token = getBearerToken(req);
+    const url = new URL(req.url);
 
-    const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr || !user) {
-      return json({ ok: false, error: "Unauthorized" }, 401);
-    }
+    const orgId = await resolveOrgId(
+      sb,
+      url.searchParams.get("org_id") ||
+        url.searchParams.get("orgId") ||
+        ""
+    );
 
-    const { searchParams } = new URL(req.url);
-    const orgId = safeStr(searchParams.get("org_id") || searchParams.get("orgId")).trim();
-    const days = Math.max(1, Math.min(365, safeNum(searchParams.get("days"), 30)));
+    const days = parseDays(url.searchParams.get("days") || "30", 30);
 
-    if (!isUuid(orgId)) {
-      return json({ ok: false, error: "Invalid org_id" }, 400);
-    }
+    const auth = await authorize(req, sb, orgId);
+    if (!auth.ok) return auth.res;
 
-    const role = await getMyRoleForOrg(sb, orgId, user);
-    if (!role || !["owner", "admin", "marketing"].includes(role)) {
-      return json({ ok: false, error: "Permisos insuficientes" }, 403);
-    }
+    const orders = await loadOrders(sb, orgId, days);
+    const labels = await loadShippingLabels(sb, orgId, days);
+    const sessionIds = uniqueSessionIds(orders);
+    const chargesList = STRIPE_KEY ? await loadStripeCharges(sessionIds) : [];
+    const { balance, payouts } = STRIPE_KEY
+      ? await loadStripeBalances()
+      : { balance: null, payouts: null };
 
-    const dateLimit = new Date();
-    dateLimit.setDate(dateLimit.getDate() - days);
-    const dateIso = dateLimit.toISOString();
-
-    const [ordersRes, labelsRes, balance, payouts, charges] = await Promise.all([
-      sb
-        .from("orders")
-        .select("*")
-        .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
-        .gte("created_at", dateIso),
-      sb
-        .from("shipping_labels")
-        .select("*")
-        .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
-        .gte("created_at", dateIso),
-      fetchStripe("balance"),
-      fetchStripe("payouts", { limit: 10 }),
-      fetchStripe("charges", { limit: 50, "expand[]": ["data.balance_transaction"] }),
-    ]);
-
-    const orders = Array.isArray(ordersRes?.data) ? ordersRes.data : [];
-    const labels = Array.isArray(labelsRes?.data) ? labelsRes.data : [];
-    const chargesList = Array.isArray(charges?.data) ? charges.data : [];
-
-    const salesMXN = orders.reduce((acc, row) => acc + safeNum(orderMoney(row), 0), 0);
-    const shippingCollectedMXN = orders.reduce((acc, row) => acc + safeNum(shippingMoney(row), 0), 0);
-    const enviaCostMXN = labels.reduce((acc, row) => acc + safeNum(enviaMoney(row), 0), 0);
-
-    let stripeFeeMXN = 0;
-    let refundedMXN = 0;
-    let disputes = 0;
-
-    for (const c of chargesList) {
-      stripeFeeMXN += chargeFeeMxn(c);
-      refundedMXN += refundedMxn(c);
-      if (c?.disputed) disputes += 1;
-    }
+    const { salesMXN, shippingCollectedMXN, orderRefundedMXN } = summarizeOrders(orders);
+    const { enviaCostMXN } = summarizeLabels(labels);
+    const { stripeFeeMXN, refundedMXN, disputes } = summarizeCharges(chargesList);
 
     const visibleProfitMXN = salesMXN - enviaCostMXN - stripeFeeMXN;
     const stripeNetMXN = salesMXN - stripeFeeMXN - refundedMXN;
 
-    const sessionIds = Array.from(
-      new Set(
-        orders
-          .map((o) => safeStr(o.stripe_session_id || o.checkout_session_id || o.session_id || o.id))
-          .filter(Boolean)
-      )
-    );
+    const chargesPublic = chargesList.map((c) => ({
+      id: c.id,
+      created: c.created,
+      status: c.status,
+      paid: c.paid,
+      amount: c.amount,
+      currency: normalizeCurrency(c.currency),
+      receipt_url: c.receipt_url,
+      refunded: c.refunded,
+      disputed: c.disputed,
+    }));
 
-    return json({
-      ok: true,
-      scope: {
-        org_id: orgId,
+    await writeAudit(sb, {
+      organization_id: orgId,
+      actor_email: normEmail(auth.user?.email),
+      actor_user_id: auth.user?.id || null,
+      action: "stripe.summary.read",
+      entity: "stripe",
+      entity_id: String(days),
+      summary: `Read Stripe summary for ${days} days`,
+      meta: {
         days,
-        role,
         orders_count: orders.length,
         stripe_sessions_count: sessionIds.length,
+        charges_count: chargesList.length,
+        role: auth.role,
+        source: "api/stripe/summary",
       },
-      kpi: {
-        sales_mxn: Math.round(salesMXN * 100) / 100,
-        shipping_collected_mxn: Math.round(shippingCollectedMXN * 100) / 100,
-        stripe_fee_mxn: Math.round(stripeFeeMXN * 100) / 100,
-        envia_cost_mxn: Math.round(enviaCostMXN * 100) / 100,
-        visible_profit_mxn: Math.round(visibleProfitMXN * 100) / 100,
-        stripe_net_mxn: Math.round(stripeNetMXN * 100) / 100,
-        refunded_mxn: Math.round(refundedMXN * 100) / 100,
-        disputes,
-      },
-      stripe_dashboard: {
-        balance_available: balance?.available || [],
-        balance_pending: balance?.pending || [],
-        payouts: payouts?.data || [],
-        charges: chargesList.map((c) => ({
-          id: c.id,
-          created: c.created,
-          status: c.status,
-          paid: c.paid,
-          amount: c.amount,
-          currency: c.currency,
-          receipt_url: c.receipt_url,
-          refunded: c.refunded,
-          disputed: c.disputed,
-        })),
-      },
+      ip: req.headers.get("x-forwarded-for") || null,
+      user_agent: req.headers.get("user-agent") || null,
     });
+
+    return json(
+      {
+        ok: true,
+        scope: {
+          org_id: orgId,
+          days,
+          role: auth.role,
+          orders_count: orders.length,
+          stripe_sessions_count: sessionIds.length,
+        },
+        kpi: {
+          sales_mxn: Math.round(salesMXN * 100) / 100,
+          shipping_collected_mxn: Math.round(shippingCollectedMXN * 100) / 100,
+          stripe_fee_mxn: Math.round(stripeFeeMXN * 100) / 100,
+          envia_cost_mxn: Math.round(enviaCostMXN * 100) / 100,
+          visible_profit_mxn: Math.round(visibleProfitMXN * 100) / 100,
+          stripe_net_mxn: Math.round(stripeNetMXN * 100) / 100,
+          refunded_mxn: Math.round(refundedMXN * 100) / 100,
+          disputes,
+          order_refunded_mxn: Math.round(orderRefundedMXN * 100) / 100,
+        },
+        stripe_dashboard: {
+          balance_available: balance?.available || [],
+          balance_pending: balance?.pending || [],
+          payouts: payouts?.data || [],
+          charges: chargesPublic,
+        },
+        rows: {
+          orders,
+          shipping_labels: labels,
+        },
+        updated_at: new Date().toISOString(),
+      },
+      200
+    );
   } catch (error) {
     return json({ ok: false, error: String(error?.message || error) }, 500);
   }
+}
+
+export async function POST(req) {
+  return GET(req);
 }
