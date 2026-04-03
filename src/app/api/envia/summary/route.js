@@ -1,8 +1,12 @@
+// src/app/api/envia/summary/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
+import { getMyRoleForOrg, isUuid, normEmail } from "@/lib/dbScope";
+import { hasPerm } from "@/lib/authz";
+import { writeAudit } from "@/lib/auditServer";
 
 const noStoreHeaders = {
   "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
@@ -15,7 +19,7 @@ const json = (data, status = 200) =>
 
 function getBearerToken(req) {
   const h = req.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
+  const m = h.match(/^Bearer\s+(.*)$/i);
   return m ? m[1] : "";
 }
 
@@ -25,242 +29,285 @@ const safeNum = (v, d = 0) => {
 };
 
 const safeStr = (v, d = "") => (typeof v === "string" ? v : v == null ? d : String(v));
-const normEmail = (s) => safeStr(s).trim().toLowerCase();
 
-function isUuid(v) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    safeStr(v).trim()
-  );
+function clampInt(v, min, max, fallback = min) {
+  const n = Math.floor(safeNum(v, fallback));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
 }
 
-async function getMyRoleForOrg(sb, orgId, user) {
-  const email = normEmail(user?.email);
-  const uid = safeStr(user?.id);
+function normalizeStatus(v) {
+  return safeStr(v).trim().toLowerCase();
+}
 
-  const q1 = await sb
-    .from("admin_users")
-    .select("role,is_active,organization_id,org_id,email,user_id")
-    .eq("is_active", true)
-    .or(`organization_id.eq.${orgId},org_id.eq.${orgId}`)
-    .or(`email.ilike.${email},user_id.eq.${uid}`)
-    .limit(20);
+function normalizeOrgId(input = "") {
+  return safeStr(input).trim();
+}
 
-  if (!q1.error && Array.isArray(q1.data) && q1.data.length) {
-    const exact =
-      q1.data.find((r) => safeStr(r?.organization_id || r?.org_id) === safeStr(orgId)) || q1.data[0];
-    return safeStr(exact?.role).toLowerCase();
-  }
+function parseOrgId(body = {}, url = null) {
+  const fromBody = normalizeOrgId(body?.org_id || body?.organization_id || body?.orgId || "");
+  if (fromBody) return fromBody;
 
-  return null;
+  const fromQuery = url
+    ? normalizeOrgId(url.searchParams.get("org_id") || url.searchParams.get("orgId") || "")
+    : "";
+
+  return fromQuery;
+}
+
+function parseDays(body = {}, url = null) {
+  const fromBody = body?.days ?? body?.range ?? null;
+  const fromQuery = url ? url.searchParams.get("days") || url.searchParams.get("range") : null;
+  return clampInt(fromBody ?? fromQuery ?? 30, 1, 365, 30);
 }
 
 function canRead(role) {
-  return ["owner", "admin", "marketing", "support", "operations"].includes(
+  return ["owner", "admin", "marketing", "support", "ops", "operations", "finance"].includes(
     safeStr(role).toLowerCase()
   );
 }
 
-function pickShipmentDate(row) {
-  return (
-    row?.shipped_at ||
-    row?.fulfilled_at ||
-    row?.updated_at ||
-    row?.created_at ||
-    null
-  );
-}
+async function authorize(req, sb, orgId) {
+  const token = getBearerToken(req);
+  const { user, error: authErr } = await requireUserFromToken(sb, token);
 
-function pickTracking(row) {
-  return (
-    safeStr(row?.tracking_number) ||
-    safeStr(row?.tracking_no) ||
-    safeStr(row?.tracking) ||
-    safeStr(row?.envia_tracking_number) ||
-    ""
-  );
-}
-
-function pickCarrier(row) {
-  return (
-    safeStr(row?.carrier) ||
-    safeStr(row?.shipping_carrier) ||
-    safeStr(row?.envia_carrier) ||
-    ""
-  );
-}
-
-function pickShipmentStatus(row) {
-  const raw =
-    safeStr(row?.shipping_status) ||
-    safeStr(row?.envia_status) ||
-    safeStr(row?.shipment_status) ||
-    safeStr(row?.status);
-
-  return raw.toLowerCase();
-}
-
-function statusBucket(status) {
-  const s = safeStr(status).toLowerCase();
-
-  if (!s) return "unknown";
-  if (["delivered", "entregado"].includes(s)) return "delivered";
-  if (
-    [
-      "shipped",
-      "in_transit",
-      "transit",
-      "en_transito",
-      "label_created",
-      "picked_up",
-      "out_for_delivery",
-      "guia_generada",
-    ].includes(s)
-  ) {
-    return "in_transit";
+  if (authErr || !user) {
+    return { ok: false, res: json({ ok: false, error: "No autorizado" }, 401) };
   }
-  if (["exception", "failed", "returned", "cancelled", "canceled", "error"].includes(s)) {
-    return "issue";
+
+  const role = await getMyRoleForOrg(sb, orgId, user);
+  if (!role || !canRead(role) || !hasPerm(role, "dashboard")) {
+    return { ok: false, res: json({ ok: false, error: "Permisos insuficientes" }, 403) };
   }
-  if (["fulfilled"].includes(s)) return "fulfilled";
-  return "other";
+
+  return { ok: true, user, role };
+}
+
+function orgFilter(orgId) {
+  return `org_id.eq.${orgId},organization_id.eq.${orgId}`;
+}
+
+function normalizeOrderRow(row) {
+  if (!row || typeof row !== "object") return null;
+
+  const amountCents =
+    safeNum(row?.amount_total_cents, NaN) ||
+    safeNum(row?.total_cents, NaN) ||
+    safeNum(row?.subtotal_cents, NaN) ||
+    0;
+
+  return {
+    id: safeStr(row?.id),
+    status: normalizeStatus(row?.status || ""),
+    payment_status: normalizeStatus(row?.payment_status || ""),
+    customer_email: safeStr(row?.customer_email || row?.email || ""),
+    amount_total_cents: Math.max(0, Math.round(amountCents)),
+    amount_total_mxn: Math.round((Math.max(0, Math.round(amountCents)) / 100) * 100) / 100,
+    stripe_session_id: safeStr(row?.stripe_session_id || row?.checkout_session_id || ""),
+    tracking_number: safeStr(row?.tracking_number || ""),
+    created_at: row?.created_at || null,
+    updated_at: row?.updated_at || null,
+    org_id: safeStr(row?.org_id || row?.organization_id || ""),
+    organization_id: safeStr(row?.organization_id || row?.org_id || ""),
+  };
+}
+
+function normalizeLabelRow(row) {
+  if (!row || typeof row !== "object") return null;
+
+  const cost =
+    safeNum(row?.envia_cost_mxn, NaN) ||
+    safeNum(row?.shipping_cost_mxn, NaN) ||
+    0;
+
+  return {
+    id: safeStr(row?.id),
+    status: normalizeStatus(row?.status || row?.shipment_status || row?.shipping_status || ""),
+    shipment_status: normalizeStatus(row?.shipment_status || ""),
+    shipping_status: normalizeStatus(row?.shipping_status || ""),
+    carrier: safeStr(row?.carrier || ""),
+    service: safeStr(row?.service || ""),
+    tracking_number: safeStr(row?.tracking_number || ""),
+    label_url: safeStr(row?.label_url || ""),
+    envia_cost_mxn: Math.round((Math.max(0, cost) + Number.EPSILON) * 100) / 100,
+    created_at: row?.created_at || null,
+    updated_at: row?.updated_at || null,
+    order_id: row?.order_id || null,
+    org_id: safeStr(row?.org_id || row?.organization_id || ""),
+    organization_id: safeStr(row?.organization_id || row?.org_id || ""),
+  };
+}
+
+function summarizeOrders(rows = []) {
+  const orders = Array.isArray(rows) ? rows.filter(Boolean).map(normalizeOrderRow).filter(Boolean) : [];
+
+  const shipped = orders.filter((o) => ["shipped", "fulfilled", "delivered"].includes(o.status || ""));
+  const pending = orders.filter((o) =>
+    ["pending", "pending_payment", "payment_failed"].includes(o.status || "")
+  );
+  const withTracking = orders.filter((o) => Boolean(o.tracking_number));
+  const paid = orders.filter((o) => o.status === "paid" || o.payment_status === "paid");
+
+  const valueMXN = orders.reduce((acc, o) => acc + safeNum(o.amount_total_mxn, 0), 0);
+
+  return {
+    total_orders: orders.length,
+    paid_orders: paid.length,
+    shipped_orders: shipped.length,
+    pending_orders: pending.length,
+    tracked_orders: withTracking.length,
+    value_mxn: Math.round(valueMXN * 100) / 100,
+    recent_orders: orders.slice(0, 10),
+  };
+}
+
+function summarizeLabels(rows = []) {
+  const labels = Array.isArray(rows) ? rows.filter(Boolean).map(normalizeLabelRow).filter(Boolean) : [];
+
+  const generated = labels.filter((l) => Boolean(l.label_url));
+  const pending = labels.filter((l) => !l.label_url && ["pending", ""].includes(l.status || ""));
+  const inTransit = labels.filter((l) =>
+    ["shipped", "in_transit", "transit", "delivered"].includes(l.status || l.shipment_status || "")
+  );
+  const totalCost = labels.reduce((acc, l) => acc + safeNum(l.envia_cost_mxn, 0), 0);
+
+  return {
+    total_labels: labels.length,
+    generated_labels: generated.length,
+    pending_labels: pending.length,
+    in_transit_labels: inTransit.length,
+    total_envia_cost_mxn: Math.round(totalCost * 100) / 100,
+    recent_labels: labels.slice(0, 10),
+  };
+}
+
+async function fetchOrders(sb, orgId, days) {
+  const limitDate = new Date();
+  limitDate.setDate(limitDate.getDate() - days);
+
+  const { data, error } = await sb
+    .from("orders")
+    .select(
+      [
+        "id",
+        "status",
+        "payment_status",
+        "amount_total_cents",
+        "total_cents",
+        "subtotal_cents",
+        "amount_total_mxn",
+        "customer_email",
+        "stripe_session_id",
+        "checkout_session_id",
+        "tracking_number",
+        "created_at",
+        "updated_at",
+        "org_id",
+        "organization_id",
+      ].join(", ")
+    )
+    .or(orgFilter(orgId))
+    .gte("created_at", limitDate.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
+async function fetchLabels(sb, orgId, days) {
+  const limitDate = new Date();
+  limitDate.setDate(limitDate.getDate() - days);
+
+  const { data, error } = await sb
+    .from("shipping_labels")
+    .select(
+      [
+        "id",
+        "status",
+        "shipment_status",
+        "shipping_status",
+        "envia_cost_mxn",
+        "tracking_number",
+        "carrier",
+        "service",
+        "label_url",
+        "order_id",
+        "created_at",
+        "updated_at",
+        "org_id",
+        "organization_id",
+      ].join(", ")
+    )
+    .or(orgFilter(orgId))
+    .gte("created_at", limitDate.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
 }
 
 export async function GET(req) {
   try {
     const sb = serverSupabase();
-    const token = getBearerToken(req);
-
-    const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr || !user) {
-      return json({ ok: false, error: "No autorizado." }, 401);
-    }
-
-    const { searchParams } = new URL(req.url);
-    const orgId = safeStr(searchParams.get("org_id")).trim();
-    const days = Math.max(7, Math.min(180, safeNum(searchParams.get("days"), 30)));
+    const url = new URL(req.url);
+    const orgId = parseOrgId({}, url);
+    const days = parseDays({}, url);
 
     if (!isUuid(orgId)) {
-      return json({ ok: false, error: "org_id inválido." }, 400);
+      return json({ ok: false, error: "org_id inválido" }, 400);
     }
 
-    const role = await getMyRoleForOrg(sb, orgId, user);
-    if (!role) return json({ ok: false, error: "Sin acceso a esta organización." }, 403);
-    if (!canRead(role)) return json({ ok: false, error: "Permisos insuficientes." }, 403);
+    const auth = await authorize(req, sb, orgId);
+    if (!auth.ok) return auth.res;
 
-    const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const [orders, labels] = await Promise.all([fetchOrders(sb, orgId, days), fetchLabels(sb, orgId, days)]);
 
-    const { data: orders, error: ordersErr } = await sb
-      .from("orders")
-      .select(`
-        id,
-        created_at,
-        updated_at,
-        fulfilled_at,
-        shipped_at,
-        amount_total_mxn,
-        shipping_total_mxn,
-        envia_cost_mxn,
-        status,
-        shipping_status,
-        shipment_status,
-        envia_status,
-        tracking_number,
-        tracking_no,
-        tracking,
-        envia_tracking_number,
-        carrier,
-        shipping_carrier,
-        envia_carrier,
-        org_id,
-        organization_id
-      `)
-      .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
-      .gte("created_at", sinceIso)
-      .order("created_at", { ascending: false })
-      .limit(800);
+    const ordersSummary = summarizeOrders(orders);
+    const labelsSummary = summarizeLabels(labels);
 
-    if (ordersErr) {
-      return json({ ok: false, error: ordersErr.message || "No se pudieron leer órdenes." }, 500);
-    }
-
-    const rows = Array.isArray(orders) ? orders : [];
-
-    const shipments = rows
-      .map((row) => {
-        const tracking = pickTracking(row);
-        const shipmentStatus = pickShipmentStatus(row);
-        const hasShipmentSignal =
-          !!tracking ||
-          !!safeStr(row?.envia_status) ||
-          !!safeStr(row?.shipping_status) ||
-          !!safeStr(row?.shipment_status) ||
-          safeStr(row?.status).toLowerCase() === "fulfilled";
-
-        if (!hasShipmentSignal) return null;
-
-        return {
-          order_id: row.id,
-          created_at: row.created_at || null,
-          shipment_date: pickShipmentDate(row),
-          tracking_number: tracking || null,
-          carrier: pickCarrier(row) || null,
-          raw_status: shipmentStatus || null,
-          status_bucket: statusBucket(shipmentStatus),
-          shipping_total_mxn: safeNum(row?.shipping_total_mxn, 0),
-          envia_cost_mxn: safeNum(row?.envia_cost_mxn, 0),
-          amount_total_mxn: safeNum(row?.amount_total_mxn, 0),
-        };
-      })
-      .filter(Boolean);
-
-    const shipmentsCount = shipments.length;
-    const deliveredCount = shipments.filter((x) => x.status_bucket === "delivered").length;
-    const transitCount = shipments.filter((x) => x.status_bucket === "in_transit").length;
-    const issueCount = shipments.filter((x) => x.status_bucket === "issue").length;
-
-    const totalShippingCharged = shipments.reduce(
-      (acc, row) => acc + safeNum(row.shipping_total_mxn, 0),
-      0
-    );
-    const totalEnviaCost = shipments.reduce(
-      (acc, row) => acc + safeNum(row.envia_cost_mxn, 0),
-      0
-    );
-
-    const uniqueCarriers = Array.from(
-      new Set(
-        shipments
-          .map((x) => safeStr(x.carrier).trim())
-          .filter(Boolean)
-      )
-    );
-
-    const lastShipmentAt = shipments
-      .map((x) => x.shipment_date)
-      .filter(Boolean)
-      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+    await writeAudit(sb, {
+      organization_id: orgId,
+      actor_email: normEmail(auth.user?.email),
+      actor_user_id: auth.user?.id || null,
+      action: "envia.summary.read",
+      entity: "shipping_labels",
+      entity_id: String(labelsSummary.total_labels),
+      summary: `Read Envía summary for ${days} days`,
+      meta: {
+        days,
+        role: auth.role,
+        orders: ordersSummary.total_orders,
+        labels: labelsSummary.total_labels,
+        source: "api/envia/summary",
+      },
+      ip: req.headers.get("x-forwarded-for") || null,
+      user_agent: req.headers.get("user-agent") || null,
+    });
 
     return json({
       ok: true,
-      scope: {
-        org_id: orgId,
-        days,
-        role,
+      org_id: orgId,
+      role: auth.role,
+      days,
+      counts: {
+        orders: ordersSummary.total_orders,
+        shipping_labels: labelsSummary.total_labels,
+        recent_orders: ordersSummary.recent_orders.length,
+        recent_labels: labelsSummary.recent_labels.length,
       },
-      summary: {
-        shipments_count: shipmentsCount,
-        delivered_count: deliveredCount,
-        in_transit_count: transitCount,
-        issue_count: issueCount,
-        shipping_collected_mxn: Math.round(totalShippingCharged * 100) / 100,
-        envia_cost_mxn: Math.round(totalEnviaCost * 100) / 100,
-        last_shipment_at: lastShipmentAt,
-        carriers: uniqueCarriers,
-      },
-      rows: shipments.slice(0, 100),
+      orders: ordersSummary,
+      shipping_labels: labelsSummary,
+      recent_orders: ordersSummary.recent_orders,
+      recent_labels: labelsSummary.recent_labels,
       updated_at: new Date().toISOString(),
     });
   } catch (e) {
     return json({ ok: false, error: String(e?.message || e) }, 500);
   }
+}
+
+export async function POST(req) {
+  return GET(req);
 }
