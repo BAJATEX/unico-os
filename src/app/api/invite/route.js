@@ -4,10 +4,28 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
-import { canManageUsers } from "@/lib/authz";
+import { canManageUsers, normalizeRole } from "@/lib/authz";
 import { writeAudit } from "@/lib/auditServer";
+import { isUuid, normEmail, getMyRoleForOrg } from "@/lib/dbScope";
 
-const json = (status, payload) => NextResponse.json(payload, { status });
+const ALLOWED_ROLES = new Set([
+  "owner",
+  "admin",
+  "marketing",
+  "ops",
+  "support",
+  "finance",
+  "viewer",
+]);
+
+const noStoreHeaders = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+};
+
+const json = (status, payload) =>
+  NextResponse.json(payload, { status, headers: noStoreHeaders });
 
 function getBearerToken(req) {
   const h = req.headers.get("authorization") || "";
@@ -15,108 +33,145 @@ function getBearerToken(req) {
   return m ? m[1] : "";
 }
 
-const isUuid = (s) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "").trim());
-
-const normEmail = (s) => String(s || "").trim().toLowerCase();
-
-async function getMyRole(sb, orgId, user) {
-  const myEmail = normEmail(user?.email);
-  const uid = user?.id || "00000000-0000-0000-0000-000000000000";
-
-  const try1 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("org_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${uid},email.eq.${myEmail}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!try1?.error && try1?.data?.is_active) return String(try1.data.role || "").toLowerCase();
-
-  const try2 = await sb
-    .from("admin_users")
-    .select("role,is_active")
-    .eq("organization_id", orgId)
-    .eq("is_active", true)
-    .or(`user_id.eq.${uid},email.eq.${myEmail}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (!try2?.data?.is_active) return null;
-  return String(try2.data.role || "").toLowerCase();
+function safeStr(v, d = "") {
+  return typeof v === "string" ? v : v == null ? d : String(v);
 }
 
-async function findExistingInvite(sb, orgId, email) {
-  const q = sb
+function cleanEmail(email) {
+  return normEmail(email).trim().toLowerCase();
+}
+
+function cleanRole(role) {
+  const r = normalizeRole(role).trim().toLowerCase();
+  return ALLOWED_ROLES.has(r) ? r : "viewer";
+}
+
+function resolveOrgId(body = {}) {
+  return safeStr(body?.org_id || body?.organization_id || body?.orgId || "").trim();
+}
+
+async function getInviteRow(sb, orgId, email) {
+  const q1 = await sb
     .from("admin_users")
-    .select("id,org_id,organization_id,email,role,is_active,created_at,updated_at,user_id")
-    .eq("email", email)
-    .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
+    .select("id, org_id, organization_id, email, role, is_active, user_id, created_at, updated_at")
+    .eq("org_id", orgId)
+    .ilike("email", email)
     .limit(1)
     .maybeSingle();
 
-  const { data, error } = await q;
-  if (error) return null;
-  return data || null;
+  if (!q1?.error && q1?.data?.id) return q1.data;
+
+  const q2 = await sb
+    .from("admin_users")
+    .select("id, org_id, organization_id, email, role, is_active, user_id, created_at, updated_at")
+    .eq("organization_id", orgId)
+    .ilike("email", email)
+    .limit(1)
+    .maybeSingle();
+
+  if (!q2?.error && q2?.data?.id) return q2.data;
+
+  return null;
 }
 
 async function upsertInvite(sb, row) {
-  const existing = await findExistingInvite(sb, row.org_id || row.organization_id, row.email);
+  const orgId = safeStr(row?.org_id || row?.organization_id || "").trim();
+  const email = cleanEmail(row?.email);
+  const role = cleanRole(row?.role);
+  const now = new Date().toISOString();
+
+  const existing = await getInviteRow(sb, orgId, email);
 
   if (existing?.id) {
     const updatePayload = {
-      org_id: row.org_id || row.organization_id || existing.org_id || existing.organization_id || null,
-      organization_id: row.organization_id || row.org_id || existing.organization_id || existing.org_id || null,
-      email: row.email,
-      role: row.role,
+      org_id: orgId,
+      organization_id: orgId,
+      email,
+      role,
       is_active: true,
-      updated_at: row.updated_at,
+      updated_at: now,
     };
 
-    const { error } = await sb.from("admin_users").update(updatePayload).eq("id", existing.id);
+    const { error } = await sb
+      .from("admin_users")
+      .update(updatePayload)
+      .eq("id", existing.id);
+
     if (error) throw error;
 
-    return { mode: "update", id: existing.id };
+    return {
+      mode: "update",
+      id: existing.id,
+      email,
+      role,
+    };
   }
 
   const insertPayload = {
-    org_id: row.org_id || row.organization_id,
-    organization_id: row.organization_id || row.org_id,
-    email: row.email,
-    role: row.role,
+    org_id: orgId,
+    organization_id: orgId,
+    email,
+    role,
     is_active: true,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    created_at: now,
+    updated_at: now,
   };
 
-  const { data, error } = await sb.from("admin_users").insert(insertPayload).select("id").maybeSingle();
+  const { data, error } = await sb
+    .from("admin_users")
+    .insert(insertPayload)
+    .select("id")
+    .maybeSingle();
+
   if (error) throw error;
 
-  return { mode: "insert", id: data?.id || null };
+  return {
+    mode: "insert",
+    id: data?.id || null,
+    email,
+    role,
+  };
+}
+
+async function authorize(req, sb, orgId) {
+  const token = getBearerToken(req);
+  const { user, error: authErr } = await requireUserFromToken(sb, token);
+
+  if (authErr || !user) {
+    return { ok: false, res: json(401, { ok: false, error: "No autorizado" }) };
+  }
+
+  const myRole = await getMyRoleForOrg(sb, orgId, user);
+  if (!myRole || !canManageUsers(myRole)) {
+    return { ok: false, res: json(403, { ok: false, error: "Permisos insuficientes" }) };
+  }
+
+  return { ok: true, user, myRole };
 }
 
 export async function POST(req) {
   try {
     const sb = serverSupabase();
-    const token = getBearerToken(req);
-
-    const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr) return json(401, { ok: false, error: "No autorizado" });
-
     const body = await req.json().catch(() => ({}));
-    const orgId = String(body?.org_id || body?.organization_id || "").trim();
-    const email = normEmail(body?.email);
-    const role = String(body?.role || "viewer").trim().toLowerCase();
 
-    if (!isUuid(orgId)) return json(400, { ok: false, error: "org_id inválido" });
-    if (!email || !email.includes("@")) return json(400, { ok: false, error: "Email inválido" });
+    const orgId = resolveOrgId(body);
+    const email = cleanEmail(body?.email);
+    const role = cleanRole(body?.role || "viewer");
 
-    const myRole = await getMyRole(sb, orgId, user);
-    if (!myRole || !canManageUsers(myRole)) return json(403, { ok: false, error: "Permisos insuficientes" });
+    if (!isUuid(orgId)) {
+      return json(400, { ok: false, error: "org_id inválido" });
+    }
 
-    const now = new Date().toISOString();
+    if (!email || !email.includes("@")) {
+      return json(400, { ok: false, error: "Email inválido" });
+    }
+
+    if (!ALLOWED_ROLES.has(role)) {
+      return json(400, { ok: false, error: "Rol inválido" });
+    }
+
+    const auth = await authorize(req, sb, orgId);
+    if (!auth.ok) return auth.res;
 
     const result = await upsertInvite(sb, {
       org_id: orgId,
@@ -124,26 +179,45 @@ export async function POST(req) {
       email,
       role,
       is_active: true,
-      updated_at: now,
-      created_at: now,
     });
 
     await writeAudit(sb, {
       organization_id: orgId,
       org_id: orgId,
-      actor_email: normEmail(user?.email),
-      actor_user_id: user?.id || null,
+      actor_email: normEmail(auth.user?.email),
+      actor_user_id: auth.user?.id || null,
       action: "admin_users.invite",
       entity: "admin_users",
       entity_id: email,
       summary: `${result.mode === "update" ? "Updated" : "Created"} invite for ${email} as ${role}`,
-      meta: { role, mode: result.mode },
+      after: {
+        mode: result.mode,
+        email,
+        role,
+        is_active: true,
+      },
+      meta: {
+        mode: result.mode,
+        role,
+        source: "api/invite",
+        actor_role: auth.myRole,
+      },
       ip: req.headers.get("x-forwarded-for") || null,
       user_agent: req.headers.get("user-agent") || null,
     });
 
-    return json(200, { ok: true, mode: result.mode, email, role });
+    return json(200, {
+      ok: true,
+      mode: result.mode,
+      email,
+      role,
+      org_id: orgId,
+    });
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
   }
+}
+
+export async function PATCH(req) {
+  return POST(req);
 }
