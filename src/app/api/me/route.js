@@ -53,6 +53,43 @@ function normalizeOrgRow(row) {
   };
 }
 
+function normalizeMembershipRow(row) {
+  if (!row || typeof row !== "object") return null;
+
+  const orgRel =
+    row.organizations && typeof row.organizations === "object"
+      ? row.organizations
+      : null;
+
+  const orgId = safeStr(
+    row.organization_id ||
+      row.org_id ||
+      orgRel?.id ||
+      ""
+  ).trim();
+
+  if (!orgId) return null;
+
+  return {
+    organization_id: orgId,
+    organization_name:
+      safeStr(
+        orgRel?.name ||
+          row.organization_name ||
+          row.name ||
+          ""
+      ).trim() || "Organización",
+    organization_slug: safeStr(
+      orgRel?.slug ||
+        row.organization_slug ||
+        row.slug ||
+        ""
+    ).trim(),
+    role: safeStr(row.role || "viewer").trim().toLowerCase(),
+    is_active: row.is_active !== false,
+  };
+}
+
 async function fetchMembershipRows(sb, user) {
   const email = normEmail(user?.email);
   const uid = safeStr(user?.id || "").trim();
@@ -76,7 +113,6 @@ async function fetchMembershipRows(sb, user) {
   ];
 
   const rows = [];
-
   for (const q of queries) {
     const { data, error } = await q.limit(100);
     if (error) continue;
@@ -87,76 +123,103 @@ async function fetchMembershipRows(sb, user) {
 }
 
 function organizationFromMembership(row) {
-  const orgFromRel = row?.organizations && typeof row.organizations === "object" ? row.organizations : null;
-  const orgId = safeStr(
-    row?.organization_id ||
-      row?.org_id ||
-      orgFromRel?.id ||
-      ""
-  ).trim();
-
-  if (!orgId) return null;
+  const normalized = normalizeMembershipRow(row);
+  if (!normalized) return null;
 
   return normalizeOrgRow({
-    id: orgId,
-    name: orgFromRel?.name || row?.organization_name || row?.name || "",
-    slug: orgFromRel?.slug || row?.organization_slug || row?.slug || "",
-    role: row?.role || "viewer",
-    is_active: row?.is_active !== false,
+    id: normalized.organization_id,
+    name: normalized.organization_name,
+    slug: normalized.organization_slug,
+    role: normalized.role,
+    is_active: normalized.is_active,
   });
 }
 
 async function resolveDefaultOrg(sb, user, organizations) {
-  const query = new URLSearchParams();
-
-  try {
-    const first = Array.isArray(organizations) ? organizations[0] : null;
-    if (first?.organization_id && isUuid(first.organization_id)) return first.organization_id;
-  } catch {}
-
-  const email = normEmail(user?.email);
-  const uid = safeStr(user?.id || "").trim();
-
-  const candidates = uniqBy(
-    [
-      ...((Array.isArray(organizations) ? organizations : [])),
-    ],
-    (x) => safeStr(x?.organization_id || "")
+  const active = (Array.isArray(organizations) ? organizations : []).filter(
+    (o) => o && o.organization_id && o.is_active !== false
   );
 
-  for (const org of candidates) {
-    const role = await getMyRoleForOrg(sb, org.organization_id, user);
-    if (role) return org.organization_id;
-  }
+  if (active.length === 1) return safeStr(active[0].organization_id);
+
+  const preferredSlug = "score-store";
+  const bySlug = active.find((o) => safeStr(o.organization_slug).toLowerCase() === preferredSlug);
+  if (bySlug) return safeStr(bySlug.organization_id);
+
+  const byName = active.find((o) =>
+    /score/i.test(safeStr(o.organization_name))
+  );
+  if (byName) return safeStr(byName.organization_id);
 
   try {
-    const { data: byUser } = await sb
-      .from("admin_users")
-      .select("organization_id, org_id, role, is_active, user_id, email")
-      .eq("is_active", true)
-      .or(`user_id.eq.${uid},email.ilike.${email}`)
-      .limit(50);
+    const { data: orgBySlug } = await sb
+      .from("organizations")
+      .select("id, name, slug, created_at")
+      .eq("slug", preferredSlug)
+      .limit(1)
+      .maybeSingle();
 
-    if (Array.isArray(byUser)) {
-      for (const row of byUser) {
-        const oid = safeStr(row?.organization_id || row?.org_id || "").trim();
-        if (isUuid(oid)) return oid;
-      }
-    }
+    if (orgBySlug?.id) return safeStr(orgBySlug.id);
   } catch {}
 
   try {
-    const { data: anyOrg } = await sb
+    const { data: orgByName } = await sb
       .from("organizations")
-      .select("id")
+      .select("id, name, slug, created_at")
+      .ilike("name", "%score%")
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
 
-    if (anyOrg?.id && isUuid(anyOrg.id)) return anyOrg.id;
+    if (orgByName?.id) return safeStr(orgByName.id);
   } catch {}
 
-  return "";
+  const { data: firstOrg } = await sb
+    .from("organizations")
+    .select("id, name, slug, created_at")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+    .catch(() => ({ data: null }));
+
+  if (firstOrg?.id) return safeStr(firstOrg.id);
+
+  return safeStr(organizations?.[0]?.organization_id || "");
+}
+
+async function buildMeResponse(sb, user) {
+  const rows = await fetchMembershipRows(sb, user);
+  const organizations = uniqBy(
+    rows
+      .map(organizationFromMembership)
+      .filter(Boolean),
+    (x) => x.organization_id
+  );
+
+  const organization_id = await resolveDefaultOrg(sb, user, organizations);
+  const current =
+    organizations.find((x) => x.organization_id === organization_id) ||
+    organizations[0] ||
+    null;
+
+  const role = safeStr(current?.role || "viewer").toLowerCase();
+  const organization_name = safeStr(current?.organization_name || "Organización");
+
+  return {
+    ok: true,
+    user: {
+      id: user?.id || null,
+      email: user?.email || null,
+      email_confirmed_at: user?.email_confirmed_at || null,
+      role,
+    },
+    role,
+    organization_id,
+    organization_name,
+    organizations,
+    current_organization: current,
+    default_organization_id: organization_id,
+  };
 }
 
 export async function GET(req) {
@@ -164,65 +227,18 @@ export async function GET(req) {
     const sb = serverSupabase();
     const token = getBearerToken(req);
 
-    const { user, error: authErr } = await requireUserFromToken(sb, token);
-    if (authErr || !user) {
-      return json(401, { ok: false, error: "No autorizado" });
+    const { user, error } = await requireUserFromToken(sb, token);
+    if (error || !user) {
+      return json(401, { ok: false, error: error || "No autorizado" });
     }
 
-    const memberships = await fetchMembershipRows(sb, user);
-
-    const organizations = uniqBy(
-      memberships
-        .map(organizationFromMembership)
-        .filter(Boolean),
-      (x) => x.organization_id
-    );
-
-    const defaultOrgId = await resolveDefaultOrg(sb, user, organizations);
-
-    let organizationName = "";
-    let role = "";
-
-    const selectedOrg =
-      organizations.find((x) => x.organization_id === defaultOrgId) ||
-      organizations[0] ||
-      null;
-
-    if (selectedOrg) {
-      organizationName = selectedOrg.organization_name || "";
-      role = selectedOrg.role || "";
-    }
-
-    if (!role && isUuid(defaultOrgId)) {
-      const derivedRole = await getMyRoleForOrg(sb, defaultOrgId, user);
-      role = derivedRole || "";
-    }
-
-    const userPayload = {
-      id: user.id || null,
-      email: user.email || null,
-      phone: user.phone || null,
-      created_at: user.created_at || null,
-      last_sign_in_at: user.last_sign_in_at || null,
-      role,
-      organization_id: defaultOrgId || null,
-      organization_name: organizationName || null,
-    };
-
-    return json(200, {
-      ok: true,
-      user: userPayload,
-      organizations: organizations,
-      organization_id: defaultOrgId || null,
-      organization_name: organizationName || null,
-      role: role || null,
-      email: user.email || null,
-    });
+    const payload = await buildMeResponse(sb, user);
+    return json(200, payload);
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
   }
 }
 
-export async function POST(req) {
-  return GET(req);
+export async function OPTIONS() {
+  return json(204, {});
 }
