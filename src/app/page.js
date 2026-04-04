@@ -9,32 +9,33 @@ import {
   Boxes,
   Bot,
   CircleDollarSign,
-  ExternalLink,
   Eye,
   Gauge,
+  History,
   Layers3,
   Loader2,
   PackageSearch,
   RefreshCcw,
+  Search,
   Settings2,
   ShieldCheck,
   ShoppingBag,
+  Sparkles,
   Store,
   Truck,
   Wand2,
   X,
-  Sparkles,
-  ChevronDown,
-  History,
-  Search,
-  Send,
-  RefreshCcw as RefreshIcon,
-  AlertTriangle,
 } from "lucide-react";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
+import AiDock from "@/app/ai-dock";
 
 function safeStr(v, d = "") {
   return typeof v === "string" ? v : v == null ? d : String(v);
+}
+
+function safeNum(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
 }
 
 function money(v) {
@@ -120,12 +121,24 @@ function HealthBadge({ label, status }) {
   );
 }
 
-function LoginScreen({ onLogin, loading, error }) {
+function LoginScreen({ onLogin, onPasswordLogin, loading, error }) {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState("magic");
 
-  const handleSubmit = (e) => {
+  const submitMagic = (e) => {
     e.preventDefault();
-    if (email.trim()) onLogin(email.trim());
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) return;
+    onLogin(cleanEmail);
+  };
+
+  const submitPassword = (e) => {
+    e.preventDefault();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password;
+    if (!cleanEmail || !cleanPassword) return;
+    onPasswordLogin(cleanEmail, cleanPassword);
   };
 
   return (
@@ -182,13 +195,40 @@ function LoginScreen({ onLogin, loading, error }) {
                 </p>
                 <h3 className="mt-2 text-3xl font-black text-white">Ingresa con tu correo</h3>
                 <p className="mt-3 text-sm leading-relaxed text-slate-300">
-                  Se enviará un enlace seguro al correo autorizado.
+                  El acceso por enlace mágico sigue activo para usuarios estándar. La cuenta owner puede entrar con contraseña.
                 </p>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <label className="block">
-                  <span className="mb-2 block text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+              <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-white/5 p-2">
+                <button
+                  type="button"
+                  onClick={() => setMode("magic")}
+                  className={cls(
+                    "rounded-2xl px-4 py-3 text-sm font-black transition",
+                    mode === "magic"
+                      ? "bg-sky-500 text-white"
+                      : "bg-transparent text-slate-300 hover:text-white"
+                  )}
+                >
+                  Link mágico
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("password")}
+                  className={cls(
+                    "rounded-2xl px-4 py-3 text-sm font-black transition",
+                    mode === "password"
+                      ? "bg-sky-500 text-white"
+                      : "bg-transparent text-slate-300 hover:text-white"
+                  )}
+                >
+                  Contraseña
+                </button>
+              </div>
+
+              <form onSubmit={mode === "magic" ? submitMagic : submitPassword} className="mt-6 space-y-4">
+                <label className="block space-y-2">
+                  <span className="block text-xs font-black uppercase tracking-[0.18em] text-slate-400">
                     Correo
                   </span>
                   <input
@@ -196,10 +236,30 @@ function LoginScreen({ onLogin, loading, error }) {
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="correo@empresa.com"
+                    placeholder="contacto.hocker@gmail.com"
                     className="unicos-input w-full rounded-2xl px-4 py-4 text-sm outline-none"
                   />
                 </label>
+
+                {mode === "password" ? (
+                  <label className="block space-y-2">
+                    <span className="block text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+                      Contraseña
+                    </span>
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      className="unicos-input w-full rounded-2xl px-4 py-4 text-sm outline-none"
+                    />
+                  </label>
+                ) : (
+                  <div className="rounded-2xl border border-sky-400/15 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">
+                    Te llegará un enlace seguro por correo.
+                  </div>
+                )}
 
                 {error ? (
                   <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
@@ -209,24 +269,18 @@ function LoginScreen({ onLogin, loading, error }) {
 
                 <button
                   type="submit"
-                  disabled={loading || !email.trim()}
+                  disabled={loading || !email.trim() || (mode === "password" && !password)}
                   className={cls(
                     "w-full rounded-2xl px-5 py-4 text-sm font-black transition flex items-center justify-center gap-2",
-                    loading || !email.trim()
+                    loading || !email.trim() || (mode === "password" && !password)
                       ? "bg-white/10 border border-white/10 text-white/50 cursor-not-allowed"
                       : "bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 text-slate-950 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
                   )}
                 >
                   {loading ? <Loader2 className="animate-spin" size={18} /> : null}
-                  {loading ? "Enviando..." : "Enviar acceso"}
+                  {loading ? "Enviando..." : mode === "magic" ? "Enviar acceso" : "Entrar como owner"}
                 </button>
               </form>
-
-              <div className="mt-6 grid gap-3">
-                <HealthBadge label="Instancia" status="ok" />
-                <HealthBadge label="Sesión" status="warn" />
-                <HealthBadge label="Permisos" status="warn" />
-              </div>
             </div>
           </div>
         </Panel>
@@ -235,566 +289,347 @@ function LoginScreen({ onLogin, loading, error }) {
   );
 }
 
-function OrgCard({ active, onClick, name, description, icon }) {
+function MiniStat({ icon, label, value, hint }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cls(
-        "w-full rounded-3xl border p-5 text-left transition",
-        active
-          ? "border-sky-400/40 bg-sky-500/10 shadow-[0_18px_50px_rgba(42,168,255,0.18)]"
-          : "border-white/10 bg-white/5 hover:bg-white/10"
-      )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sky-200">
-          {icon}
-        </div>
-        {active ? <StatusPill ok tone="blue">Activa</StatusPill> : null}
-      </div>
-      <h4 className="mt-4 text-lg font-black text-white">{name}</h4>
-      <p className="mt-2 text-sm leading-relaxed text-slate-300">{description}</p>
-    </button>
-  );
-}
-
-function AIQuickActions({ token, orgId, role }) {
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [answer, setAnswer] = useState("");
-
-  const canUse = ["owner", "admin", "marketing", "support", "operations", "ops"].includes(
-    safeStr(role).toLowerCase()
-  );
-
-  const run = useCallback(
-    async (msg) => {
-      if (!token || !orgId || !msg) return;
-      try {
-        setLoading(true);
-        setAnswer("");
-
-        const res = await fetch("/api/ai", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            message: String(msg).trim().slice(0, 1200),
-            org_id: orgId,
-          }),
-        });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data?.ok) throw new Error(data?.error || "No pude completar la solicitud.");
-
-        setAnswer(data.reply || "Listo.");
-      } catch (e) {
-        setAnswer(String(e?.message || e));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [token, orgId]
-  );
-
-  if (!canUse) return null;
-
-  return (
-    <Panel className="p-5">
-      <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sky-200">
-          <Bot size={20} />
-        </div>
-        <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Asistente</p>
-          <h3 className="mt-1 text-xl font-black text-white">Pídele tareas o explicaciones</h3>
+    <Card className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sky-200">{icon}</div>
+        <div className="text-right">
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">{label}</p>
+          <p className="mt-2 text-xl font-black text-white">{value}</p>
+          {hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
         </div>
       </div>
-
-      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          "Dame un resumen claro del estado actual del panel.",
-          "Muéstrame un resumen simple de ventas y pedidos.",
-          "Activa una promo que diga: Envío gratis en pedidos seleccionados.",
-          "Explícame para qué sirve cada bloque principal del panel.",
-        ].map((q) => (
-          <button
-            key={q}
-            type="button"
-            onClick={() => run(q)}
-            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left text-sm font-semibold text-slate-200 hover:bg-white/10 transition-colors"
-          >
-            {q}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-5">
-        <label className="unicos-label">Escribe una instrucción</label>
-        <div className="flex flex-col gap-3 md:flex-row">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            rows={4}
-            className="unicos-input flex-1 resize-none"
-            placeholder="Ejemplo: prepara un resumen ejecutivo del día, apaga la promo, explícame cómo revisar pedidos o dime qué sigue por cerrar."
-          />
-          <button
-            type="button"
-            disabled={loading || !safeStr(input).trim()}
-            onClick={() => run(input)}
-            className={cls(
-              "unicos-btn min-w-[200px] rounded-2xl px-5 py-4 text-sm text-white transition flex justify-center items-center",
-              loading || !safeStr(input).trim()
-                ? "bg-white/10 border border-white/10 opacity-50"
-                : "bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 shadow-[0_18px_50px_rgba(42,168,255,0.28)]"
-            )}
-          >
-            {loading ? <Loader2 className="animate-spin" size={20} /> : "Ejecutar"}
-          </button>
-        </div>
-      </div>
-
-      {answer ? (
-        <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5 animate-unicos-slide-up">
-          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Respuesta</p>
-          <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-200">{answer}</div>
-        </div>
-      ) : null}
-    </Panel>
-  );
-}
-
-function FinanceSummary({ token, orgId, role }) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [data, setData] = useState(null);
-
-  const canView = ["owner", "admin", "marketing"].includes(safeStr(role).toLowerCase());
-
-  const load = useCallback(async () => {
-    if (!token || !orgId || !canView) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-
-      const res = await fetch(`/api/stripe/summary?org_id=${encodeURIComponent(orgId)}&days=30`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok || !payload?.ok) throw new Error(payload?.error || "No se pudo leer el resumen financiero.");
-
-      setData(payload);
-    } catch (e) {
-      setError(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }, [token, orgId, canView]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (!canView) return null;
-
-  if (loading) {
-    return (
-      <Panel className="p-6">
-        <div className="flex items-center gap-3 text-slate-300">
-          <Loader2 className="animate-spin" size={18} />
-          <span className="font-semibold">Cargando resumen ejecutivo...</span>
-        </div>
-      </Panel>
-    );
-  }
-
-  if (error) {
-    return (
-      <Panel className="p-6">
-        <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm font-semibold text-rose-200">
-          {error}
-        </div>
-      </Panel>
-    );
-  }
-
-  const kpi = data?.kpi || {};
-
-  return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <MetricCard icon={<CircleDollarSign size={20} />} label="Ventas" value={money(kpi.sales_mxn)} hint="Últimos 30 días" />
-      <MetricCard icon={<BarChart3 size={20} />} label="Comisión cobros" value={money(kpi.stripe_fee_mxn)} hint="Cobro de pagos" />
-      <MetricCard icon={<Truck size={20} />} label="Costo envíos" value={money(kpi.envia_cost_mxn)} hint="Costo operativo" />
-      <MetricCard icon={<Gauge size={20} />} label="Ganancia" value={money(kpi.visible_profit_mxn)} hint="Vista simple" />
-    </div>
-  );
-}
-
-function HealthSummary({ token }) {
-  const [status, setStatus] = useState({
-    auth: "warn",
-    stripe: "warn",
-    db: "warn",
-    envia: "warn",
-    ia: "warn",
-  });
-
-  const load = useCallback(async () => {
-    if (!token) return;
-
-    try {
-      const res = await fetch("/api/bootstrap", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error();
-
-      setStatus({
-        auth: data?.checks?.auth ? "ok" : "warn",
-        stripe: data?.checks?.stripe ? "ok" : "warn",
-        db: data?.checks?.db ? "ok" : "warn",
-        envia: data?.checks?.envia ? "ok" : "warn",
-        ia: data?.checks?.ia ? "ok" : "warn",
-      });
-    } catch {
-      setStatus({
-        auth: "bad",
-        stripe: "bad",
-        db: "bad",
-        envia: "bad",
-        ia: "bad",
-      });
-    }
-  }, [token]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return (
-    <Panel className="p-5">
-      <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-emerald-200">
-          <ShieldCheck size={20} />
-        </div>
-        <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Estado</p>
-          <h3 className="mt-1 text-xl font-black text-white">Salud del sistema</h3>
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <HealthBadge label="Auth" status={status.auth} />
-        <HealthBadge label="Stripe" status={status.stripe} />
-        <HealthBadge label="DB" status={status.db} />
-        <HealthBadge label="Envía" status={status.envia} />
-        <HealthBadge label="IA" status={status.ia} />
-      </div>
-
-      <div className="mt-5 flex justify-end">
-        <button
-          type="button"
-          onClick={load}
-          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white hover:bg-white/10"
-        >
-          <RefreshCcw size={16} />
-          Revalidar
-        </button>
-      </div>
-    </Panel>
+    </Card>
   );
 }
 
 function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
-  const [orders, setOrders] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [auditRows, setAuditRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [health, setHealth] = useState(null);
+  const [audit, setAudit] = useState([]);
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiInput, setAiInput] = useState("");
+  const [aiMessages, setAiMessages] = useState([
+    {
+      role: "assistant",
+      content: "Panel listo. Puedes revisar salud, auditoría o abrir ajustes del sitio.",
+    },
+  ]);
 
-  const load = useCallback(async () => {
-    if (!token || !orgId) return;
+  const canUse = Boolean(token && orgId);
 
+  const loadHealth = useCallback(async () => {
     try {
-      setLoading(true);
-      setError("");
-
-      const [ordersRes, productsRes, auditRes] = await Promise.all([
-        supabase
-          .from("orders")
-          .select("id, amount_total_mxn, stripe_session_id, status, created_at, org_id, organization_id")
-          .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
-          .order("created_at", { ascending: false })
-          .limit(50),
-        supabase
-          .from("products")
-          .select("id,name,sku,price_mxn,stock,section_id,sub_section,rank,image_url,is_active,deleted_at,org_id,organization_id")
-          .or(`org_id.eq.${orgId},organization_id.eq.${orgId}`)
-          .is("deleted_at", null)
-          .order("rank", { ascending: true })
-          .limit(50),
-        fetch(`/api/audit/list?org_id=${encodeURIComponent(orgId)}&limit=10`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ]);
-
-      const auditData = await auditRes.json().catch(() => ({}));
-
-      if (ordersRes.error) throw ordersRes.error;
-      if (productsRes.error) throw productsRes.error;
-      if (!auditRes.ok || !auditData?.ok) throw new Error(auditData?.error || "No se pudo leer auditoría.");
-
-      setOrders(ordersRes.data || []);
-      setProducts(productsRes.data || []);
-      setAuditRows(Array.isArray(auditData.rows) ? auditData.rows : []);
-    } catch (e) {
-      setError(String(e?.message || e));
-    } finally {
-      setLoading(false);
+      const res = await fetch("/api/health", { cache: "no-store" });
+      const j = await res.json().catch(() => ({}));
+      setHealth(j || null);
+    } catch {
+      setHealth(null);
     }
-  }, [token, orgId]);
+  }, []);
+
+  const loadAudit = useCallback(async () => {
+    if (!canUse) return;
+    setAuditBusy(true);
+    try {
+      const res = await fetch(`/api/audit/list?org_id=${encodeURIComponent(orgId)}&limit=120`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) throw new Error(j?.error || "Desincronización de actividad.");
+      setAudit(j.rows || []);
+    } catch {
+      setAudit([]);
+    } finally {
+      setAuditBusy(false);
+    }
+  }, [canUse, orgId, token]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    loadHealth();
+    loadAudit();
+  }, [loadHealth, loadAudit]);
 
-  const activeProducts = useMemo(
-    () => (products || []).filter((p) => p?.is_active !== false),
-    [products]
-  );
+  const filteredAudit = useMemo(() => audit.slice(0, 12), [audit]);
 
-  const paidOrders = useMemo(
-    () =>
-      (orders || []).filter((o) => {
-        const status = safeStr(o?.status || "").toLowerCase();
-        return status === "paid" || status === "fulfilled" || safeStr(o?.payment_status).toLowerCase() === "paid";
-      }),
-    [orders]
-  );
+  const sendAi = async () => {
+    const msg = aiInput.trim();
+    if (!msg || !canUse) return;
+    setAiBusy(true);
+    setAiInput("");
+    setAiMessages((m) => [...m, { role: "user", content: msg }]);
 
-  const pendingOrders = useMemo(
-    () =>
-      (orders || []).filter((o) => {
-        const status = safeStr(o?.status || "").toLowerCase();
-        return ["pending", "pending_payment", "payment_failed"].includes(status);
-      }),
-    [orders]
-  );
+    try {
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message: msg, organization_id: orgId }),
+      });
 
-  const scoreStoreUrl = process.env.NEXT_PUBLIC_SCORESTORE_URL || "https://scorestore.vercel.app";
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || "Error de red IA.");
+
+      setAiMessages((m) => [...m, { role: "assistant", content: j?.reply || "Comando ejecutado con éxito." }]);
+    } catch (e) {
+      setAiMessages((m) => [
+        ...m,
+        { role: "assistant", content: `Error de Sistema: ${String(e?.message || e)}` },
+      ]);
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  if (!token) return null;
 
   return (
-    <main className="min-h-screen px-4 py-6 unicos-shell">
-      <div className="unicos-wrap mx-auto w-full max-w-7xl space-y-5">
+    <div className="min-h-screen px-4 py-6 unicos-shell animate-unicos-slide-up">
+      <div className="unicos-wrap space-y-5">
         <Panel className="p-5">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-[11px] font-black uppercase tracking-[0.22em] text-sky-300">
-                UnicOs Control Center
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                Centro de control
               </p>
-              <h1 className="mt-2 text-3xl md:text-4xl font-black leading-tight text-white">
-                {orgName || "Score Store"} · Panel operativo
-              </h1>
-              <p className="mt-3 text-sm leading-relaxed text-slate-300">
-                Resumen de ventas, pedidos, catálogo, salud del sistema y acciones rápidas con IA.
+              <h2 className="mt-2 text-3xl font-black text-white">{orgName || "UnicOs"}</h2>
+              <p className="mt-2 text-sm text-slate-300">
+                Organización: <span className="font-semibold text-white">{orgId || "—"}</span> · Rol:{" "}
+                <span className="font-semibold text-white">{role || "viewer"}</span>
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
+                onClick={loadHealth}
+                className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
+              >
+                <RefreshCcw size={16} />
+                Salud
+              </button>
+              <button
+                type="button"
+                onClick={loadAudit}
+                className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
+              >
+                <History size={16} />
+                Auditoría
+              </button>
+              <button
+                type="button"
                 onClick={onGoSettings}
-                className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400 px-4 py-3 text-sm text-slate-950 shadow-[0_18px_50px_rgba(42,168,255,0.28)] hover:brightness-110"
+                className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
               >
                 <Settings2 size={16} />
-                Abrir configuración
+                Ajustes
               </button>
-
-              <a
-                href={scoreStoreUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
-              >
-                <ExternalLink size={16} />
-                Ver sitio público
-              </a>
-
-              <a
-                href="#panel-ia"
-                className="unicos-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
-              >
-                <Wand2 size={16} />
-                Usar asistente
-              </a>
             </div>
           </div>
         </Panel>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <OrgCard
-            active
-            onClick={() => {}}
-            name={safeStr(orgName || "Score Store")}
-            description="Panel activo para revisar ventas, pedidos, catálogo, mensajes del sitio y seguimiento operativo."
-            icon={<Store size={20} />}
-          />
-          <OrgCard
-            active={false}
-            onClick={() => {}}
-            name="Próximos sitios de Único"
-            description="La estructura ya está preparada para sumar nuevos sitios, campañas y tableros sin cambiar la lógica del panel."
-            icon={<Layers3 size={20} />}
-          />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <MiniStat icon={<Gauge size={18} />} label="Estado" value={health?.ready ? "Listo" : "Revisar"} hint="Entorno / llaves" />
+          <MiniStat icon={<Boxes size={18} />} label="Auditoría" value={audit.length} hint="Últimos registros" />
+          <MiniStat icon={<ShieldCheck size={18} />} label="Acceso" value={role || "viewer"} hint="Permisos" />
+          <MiniStat icon={<Store size={18} />} label="Tienda" value="Score Store" hint="Conectada" />
         </div>
 
-        <HealthSummary token={token} />
-
-        <FinanceSummary token={token} orgId={orgId} role={role} />
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <MetricCard
-            icon={<ShoppingBag size={20} />}
-            label="Pedidos pagados"
-            value={String(paidOrders.length)}
-            hint="Confirmados"
-          />
-          <MetricCard
-            icon={<PackageSearch size={20} />}
-            label="Pedidos por revisar"
-            value={String(pendingOrders.length)}
-            hint="Pendientes o en proceso"
-          />
-          <MetricCard
-            icon={<Boxes size={20} />}
-            label="Productos activos"
-            value={String(activeProducts.length)}
-            hint="Catálogo visible"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.15fr_.85fr]">
+        <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_.95fr] gap-5">
           <Panel className="p-5">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Operación</p>
-                <h3 className="mt-1 text-xl font-black text-white">Pedidos recientes</h3>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Salud del sistema</p>
+                <h3 className="mt-2 text-2xl font-black text-white">Variables y estado</h3>
               </div>
               <button
                 type="button"
-                onClick={load}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white hover:bg-white/10"
+                onClick={loadHealth}
+                className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
               >
                 <RefreshCcw size={16} />
-                Recargar
+                Releer
               </button>
             </div>
 
-            {loading ? (
-              <div className="mt-5 flex items-center gap-3 text-slate-300">
-                <Loader2 className="animate-spin" size={18} />
-                <span className="font-semibold">Cargando datos...</span>
-              </div>
-            ) : error ? (
-              <div className="mt-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm font-semibold text-rose-200">
-                {error}
-              </div>
-            ) : (
-              <div className="mt-5 space-y-3">
-                {(orders || []).slice(0, 8).map((o) => (
-                  <div
-                    key={o.id}
-                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 hover:bg-white/10 transition-colors"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-sm font-black text-white">
-                          {safeStr(o.id).slice(0, 8)} · {safeStr(o.status || "pending")}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-400">
-                          {dateTime(o.created_at)} · {safeStr(o.stripe_session_id || "sin session")}
-                        </p>
-                      </div>
-                      <div className="text-sm font-black text-white">
-                        {money(o.amount_total_mxn)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+            <div className="mt-5 grid gap-3">
+              <HealthBadge label="Supabase" status={health?.env?.NEXT_PUBLIC_SUPABASE_URL ? "ok" : "bad"} />
+              <HealthBadge label="Auth pública" status={health?.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "ok" : "bad"} />
+              <HealthBadge label="Service role" status={health?.env?.SUPABASE_SECRET_KEY ? "ok" : "bad"} />
+              <HealthBadge label="Stripe" status={health?.env?.STRIPE_SECRET_KEY ? "ok" : "bad"} />
+              <HealthBadge label="Envía" status={health?.env?.ENVIA_API_KEY ? "ok" : "bad"} />
+              <HealthBadge label="Gemini" status={health?.env?.GEMINI_API_KEY ? "ok" : "bad"} />
+            </div>
 
-                {!orders.length ? (
-                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-sm text-slate-300">
-                    Todavía no hay pedidos visibles para esta organización.
-                  </div>
-                ) : null}
-              </div>
-            )}
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <MetricCard icon={<CircleDollarSign size={18} />} label="Mercado" value="MXN" hint="Tienda en vivo" />
+              <MetricCard icon={<Truck size={18} />} label="Envíos" value="Automático" hint="Score Store" />
+            </div>
           </Panel>
 
           <Panel className="p-5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sky-200">
-                <ShieldCheck size={20} />
-              </div>
+            <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Actividad</p>
-                <h3 className="mt-1 text-xl font-black text-white">Movimientos recientes</h3>
+                <h3 className="mt-2 text-2xl font-black text-white">Últimos eventos</h3>
               </div>
+              <button
+                type="button"
+                onClick={loadAudit}
+                className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
+              >
+                <RefreshCcw size={16} />
+                Refrescar
+              </button>
             </div>
 
-            <div className="mt-5 space-y-3">
-              {(auditRows || []).slice(0, 8).map((row) => (
-                <div
-                  key={row.id}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 hover:bg-white/10 transition-colors"
-                >
-                  <p className="text-sm font-black text-white">{safeStr(row.summary || row.action)}</p>
-                  <div className="mt-1 flex items-center justify-between gap-3 text-xs text-slate-400">
-                    <span>{safeStr(row.actor_email || "Sistema")}</span>
-                    <span>{dateTime(row.created_at)}</span>
+            <div className="mt-5 space-y-3 max-h-[430px] overflow-auto pr-1">
+              {auditBusy ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center text-sm text-slate-300">
+                  Cargando actividad...
+                </div>
+              ) : filteredAudit.length ? (
+                filteredAudit.map((r) => (
+                  <div key={r.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-black text-white">{r.action || "—"}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {r.actor_email || "Sistema"} · {dateTime(r.created_at)}
+                        </p>
+                      </div>
+                      {r.entity ? <span className="unicos-chip">{r.entity}</span> : null}
+                    </div>
+                    {r.summary ? <p className="mt-3 text-sm text-slate-300 leading-relaxed">{r.summary}</p> : null}
                   </div>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center text-sm text-slate-300">
+                  Sin registros o faltan permisos de administrador.
                 </div>
-              ))}
-
-              {!auditRows.length ? (
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-sm text-slate-300">
-                  Todavía no hay actividad reciente visible en el panel.
-                </div>
-              ) : null}
+              )}
             </div>
           </Panel>
         </div>
 
-        <div id="panel-ia">
-          <AIQuickActions token={token} orgId={orgId} role={role} />
+        <div className="grid grid-cols-1 xl:grid-cols-[.95fr_1.05fr] gap-5">
+          <Panel className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">IA operativa</p>
+                <h3 className="mt-2 text-2xl font-black text-white">UnicOs AI Dock</h3>
+              </div>
+              <Bot className="text-sky-300" size={20} />
+            </div>
+
+            <div className="mt-5 h-[360px] overflow-auto rounded-3xl border border-white/10 bg-black/20 p-4 space-y-3">
+              {aiMessages.map((m, idx) => (
+                <div
+                  key={idx}
+                  className={cls(
+                    "max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+                    m.role === "user"
+                      ? "ml-auto bg-sky-500 text-slate-950 font-semibold"
+                      : "mr-auto bg-white/8 text-slate-100 border border-white/10"
+                  )}
+                >
+                  {m.content}
+                </div>
+              ))}
+              {aiBusy ? (
+                <div className="mr-auto rounded-2xl border border-white/10 bg-white/8 px-4 py-3 text-sm text-slate-300">
+                  Pensando...
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-4 flex gap-3">
+              <input
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") sendAi();
+                }}
+                placeholder="Pregunta por pedidos, settings, envíos, finanzas..."
+                className="unicos-input flex-1 rounded-2xl px-4 py-3 text-sm outline-none"
+              />
+              <button
+                type="button"
+                onClick={sendAi}
+                className="unicos-btn rounded-2xl bg-sky-500 px-4 py-3 text-sm font-black text-slate-950"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </Panel>
+
+          <Panel className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Acciones rápidas</p>
+                <h3 className="mt-2 text-2xl font-black text-white">Conexión con Score Store</h3>
+              </div>
+              <Sparkles className="text-cyan-300" size={20} />
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <a
+                href={process.env.NEXT_PUBLIC_SCORESTORE_URL || "https://scorestore.vercel.app"}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/10 transition"
+              >
+                <div className="flex items-center gap-3">
+                  <ShoppingBag size={18} className="text-sky-300" />
+                  <p className="font-black text-white">Abrir tienda</p>
+                </div>
+                <p className="mt-3 text-sm text-slate-300">
+                  Revisar catálogo, checkout y experiencia pública.
+                </p>
+              </a>
+
+              <button
+                type="button"
+                onClick={onGoSettings}
+                className="rounded-2xl border border-white/10 bg-white/5 p-5 hover:bg-white/10 transition text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <Settings2 size={18} className="text-sky-300" />
+                  <p className="font-black text-white">Ajustes del sitio</p>
+                </div>
+                <p className="mt-3 text-sm text-slate-300">
+                  Branding, promo visible, soporte y conexión pública.
+                </p>
+              </button>
+
+              <Card className="p-5 md:col-span-2">
+                <div className="flex items-center gap-3">
+                  <ShieldCheck size={18} className="text-emerald-300" />
+                  <p className="font-black text-white">Sincronización</p>
+                </div>
+                <p className="mt-3 text-sm text-slate-300 leading-relaxed">
+                  UnicOs queda enlazado con Score Store por Supabase compartido, /api/me, /api/score/site-settings, auditoría, AI y servicios de Stripe/Envía.
+                </p>
+              </Card>
+            </div>
+          </Panel>
         </div>
+
+        <AiDock />
       </div>
-    </main>
+    </div>
   );
 }
 
-export default function HomePage() {
+export default function Page() {
   const [mounted, setMounted] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [globalError, setGlobalError] = useState("");
   const [sessionToken, setSessionToken] = useState("");
   const [role, setRole] = useState("");
   const [orgId, setOrgId] = useState("");
   const [orgName, setOrgName] = useState("");
   const [view, setView] = useState("dashboard");
-  const [globalError, setGlobalError] = useState("");
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const loadSessionAndOrg = useCallback(async () => {
     if (!supabase) {
@@ -816,7 +651,9 @@ export default function HomePage() {
 
       const whoRes = await fetch("/api/me", {
         headers: { Authorization: `Bearer ${accessToken}` },
+        cache: "no-store",
       });
+
       const who = await whoRes.json().catch(() => ({}));
       if (!whoRes.ok || !who?.ok) throw new Error(who?.error || "No autorizado.");
 
@@ -847,6 +684,10 @@ export default function HomePage() {
     } catch (e) {
       setGlobalError(String(e?.message || e));
     }
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -893,6 +734,29 @@ export default function HomePage() {
       setAuthLoading(false);
     }
   }, []);
+
+  const handlePasswordLogin = useCallback(async (emailToLogin, password) => {
+    if (!supabase) return;
+
+    try {
+      setAuthLoading(true);
+      setGlobalError("");
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: emailToLogin,
+        password,
+      });
+
+      if (error) throw error;
+
+      await loadSessionAndOrg();
+      setGlobalError("Acceso confirmado. Sincronizando panel...");
+    } catch (e) {
+      setGlobalError(String(e?.message || e));
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [loadSessionAndOrg]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -943,7 +807,14 @@ export default function HomePage() {
   }
 
   if (!sessionToken) {
-    return <LoginScreen onLogin={handleLogin} loading={authLoading} error={globalError} />;
+    return (
+      <LoginScreen
+        onLogin={handleLogin}
+        onPasswordLogin={handlePasswordLogin}
+        loading={authLoading}
+        error={globalError}
+      />
+    );
   }
 
   if (view === "settings") {
