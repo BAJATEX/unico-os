@@ -3,12 +3,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import Stripe from "stripe";
 import { serverSupabase, requireUserFromToken } from "@/lib/serverSupabase";
 import { hasPerm } from "@/lib/authz";
 import { writeAudit } from "@/lib/auditServer";
 import { getMyRoleForOrg, isUuid, normEmail } from "@/lib/dbScope";
 
-const STRIPE_API = "https://api.stripe.com/v1";
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || "";
+const FX_USD_TO_MXN = Number(process.env.FX_USD_TO_MXN || process.env.USD_MXN || "18");
 
 const noStoreHeaders = {
   "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
@@ -40,182 +42,72 @@ function clampInt(v, min, max, fallback = min) {
   return Math.max(min, Math.min(max, n));
 }
 
-function clampList(arr, max = 120) {
-  const out = [];
-  for (const v of Array.isArray(arr) ? arr : []) {
-    const s = String(v || "").trim();
-    if (!s) continue;
-    out.push(s);
-    if (out.length >= max) break;
-  }
-  return out;
-}
-
 function normalizeEmail(v) {
   return normEmail(v).trim().toLowerCase();
 }
 
-function fxToMXN(currency) {
-  const c = String(currency || "mxn").toLowerCase();
-  if (c === "mxn") return 1;
-  if (c === "usd") return Math.max(0.0001, Number(process.env.FX_USD_TO_MXN || 18));
+function parseOrgId(body = {}, url = null) {
+  const fromBody = safeStr(body?.org_id || body?.organization_id || body?.orgId || "").trim();
+  if (fromBody) return fromBody;
 
+  const fromQuery = url
+    ? safeStr(url.searchParams.get("org_id") || url.searchParams.get("orgId") || "").trim()
+    : "";
+
+  return fromQuery;
+}
+
+function parseCurrency(value) {
+  const c = safeStr(value || "mxn").trim().toLowerCase();
+  if (!c) return "mxn";
+  if (c === "usd" || c === "mxn") return c;
+  return c;
+}
+
+function parseSessionsInput(body = {}, url = null) {
+  const raw =
+    (Array.isArray(body?.sessions) && body.sessions) ||
+    (Array.isArray(body?.items) && body.items) ||
+    (Array.isArray(body?.data) && body.data) ||
+    [];
+
+  const q = url?.searchParams?.get("sessions") || "";
+  if (!raw.length && q) {
+    return q
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map((id) => ({ session_id: id }));
+  }
+
+  return raw
+    .map((item) => ({
+      session_id: safeStr(item?.session_id || item?.checkout_session_id || item?.stripe_session_id || item?.id || "").trim(),
+      payment_intent_id: safeStr(item?.payment_intent_id || item?.paymentIntentId || item?.payment_intent || "").trim(),
+      currency: parseCurrency(item?.currency || item?.currency_code || "mxn"),
+      amount_total_cents: Math.max(0, Math.round(safeNum(item?.amount_total_cents || item?.total_cents || item?.amount || 0))),
+      fee_percent: Math.max(0, safeNum(item?.fee_percent || item?.stripe_fee_percent || 0)),
+      fee_fixed_mxn: Math.max(0, safeNum(item?.fee_fixed_mxn || item?.fixed_fee_mxn || 0)),
+    }))
+    .filter((x) => x.session_id || x.payment_intent_id);
+}
+
+function fxToMXN(currency) {
+  const c = safeStr(currency || "mxn").toLowerCase();
+  if (c === "mxn") return 1;
+  if (c === "usd") return Math.max(0.0001, FX_USD_TO_MXN);
   const envKey = `FX_${c.toUpperCase()}_TO_MXN`;
   const fx = Number(process.env[envKey] || NaN);
   return Number.isFinite(fx) && fx > 0 ? fx : 1;
 }
 
-function getStripeKey() {
-  const key = safeStr(process.env.STRIPE_SECRET_KEY || "").trim();
-  if (!key) throw new Error("Falta STRIPE_SECRET_KEY");
-  return key;
+function stripeClient() {
+  if (!STRIPE_KEY) return null;
+  return new Stripe(STRIPE_KEY, { apiVersion: "2024-06-20" });
 }
 
-async function stripeGET(path, query = {}) {
-  const url = new URL(`${STRIPE_API}${path}`);
-  for (const [k, v] of Object.entries(query || {})) {
-    if (v === undefined || v === null) continue;
-    if (Array.isArray(v)) {
-      for (const it of v) url.searchParams.append(k, String(it));
-    } else {
-      url.searchParams.set(k, String(v));
-    }
-  }
-
-  const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${getStripeKey()}`,
-    },
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(String(data?.error?.message || `Stripe error (${res.status})`));
-  }
-
-  return data;
-}
-
-async function feeFromSession(sessionId) {
-  const session = await stripeGET(`/checkout/sessions/${encodeURIComponent(sessionId)}`, {
-    "expand[]": ["payment_intent.latest_charge.balance_transaction"],
-  });
-
-  const pi = session?.payment_intent;
-  const piId = typeof pi === "string" ? pi : pi?.id;
-  if (!piId) {
-    return {
-      session_id: sessionId,
-      fee_mxn: 0,
-      fee_currency: null,
-      fee_cents: 0,
-      payment_intent_id: null,
-      charge_id: null,
-      balance_transaction_id: null,
-    };
-  }
-
-  const paymentIntent =
-    typeof pi === "object" && pi
-      ? pi
-      : await stripeGET(`/payment_intents/${encodeURIComponent(piId)}`, {
-          "expand[]": ["latest_charge.balance_transaction"],
-        });
-
-  const latestCharge = paymentIntent?.latest_charge;
-  const chId = typeof latestCharge === "string" ? latestCharge : latestCharge?.id;
-  if (!chId) {
-    return {
-      session_id: sessionId,
-      fee_mxn: 0,
-      fee_currency: null,
-      fee_cents: 0,
-      payment_intent_id: piId,
-      charge_id: null,
-      balance_transaction_id: null,
-    };
-  }
-
-  const charge =
-    typeof latestCharge === "object" && latestCharge
-      ? latestCharge
-      : await stripeGET(`/charges/${encodeURIComponent(chId)}`, {
-          "expand[]": ["balance_transaction"],
-        });
-
-  const bt = charge?.balance_transaction;
-  const btId = typeof bt === "string" ? bt : bt?.id;
-  if (!btId) {
-    return {
-      session_id: sessionId,
-      fee_mxn: 0,
-      fee_currency: null,
-      fee_cents: 0,
-      payment_intent_id: piId,
-      charge_id: chId,
-      balance_transaction_id: null,
-    };
-  }
-
-  const balanceTx =
-    typeof bt === "object" && bt
-      ? bt
-      : await stripeGET(`/balance_transactions/${encodeURIComponent(btId)}`);
-
-  const feeCents = Number(balanceTx?.fee || 0) || 0;
-  const feeCurrency = String(balanceTx?.currency || "").toLowerCase() || null;
-  const feeMXN = (feeCents / 100) * fxToMXN(feeCurrency);
-
-  return {
-    session_id: sessionId,
-    fee_mxn: Number.isFinite(feeMXN) ? feeMXN : 0,
-    fee_currency: feeCurrency,
-    fee_cents: feeCents,
-    payment_intent_id: piId,
-    charge_id: chId,
-    balance_transaction_id: btId,
-  };
-}
-
-async function resolveOrgId(sb, explicitOrgId = "") {
-  const explicit = safeStr(explicitOrgId).trim();
-  if (isUuid(explicit)) return explicit;
-
-  const envId = safeStr(process.env.SCORE_ORG_ID || process.env.DEFAULT_ORG_ID || "").trim();
-  if (isUuid(envId)) return envId;
-
-  try {
-    const { data: bySlug } = await sb
-      .from("organizations")
-      .select("id")
-      .eq("slug", "score-store")
-      .limit(1)
-      .maybeSingle();
-
-    if (bySlug?.id) return bySlug.id;
-
-    const { data: byName } = await sb
-      .from("organizations")
-      .select("id")
-      .ilike("name", "%score%")
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (byName?.id) return byName.id;
-
-    const { data: anyOrg } = await sb
-      .from("organizations")
-      .select("id")
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (anyOrg?.id) return anyOrg.id;
-  } catch {}
-
-  return "1f3b9980-a1c5-4557-b4eb-a75bb9a8aaa6";
+function canView(role) {
+  return hasPerm(role, "orders") && ["owner", "admin", "finance", "marketing"].includes(safeStr(role).toLowerCase());
 }
 
 async function authorize(req, sb, orgId) {
@@ -227,67 +119,123 @@ async function authorize(req, sb, orgId) {
   }
 
   const role = await getMyRoleForOrg(sb, orgId, user);
-  if (!role || !hasPerm(role, "dashboard")) {
+  if (!role || !canView(role)) {
     return { ok: false, res: json(403, { ok: false, error: "Permisos insuficientes" }) };
   }
 
   return { ok: true, user, role };
 }
 
-function normalizeSessionsInput(body = {}, reqUrl = null) {
-  const fromBody =
-    body?.stripe_session_ids ||
-    body?.session_ids ||
-    body?.sessions ||
-    body?.ids ||
-    [];
+function normalizeSessionDetails(session, fallback = {}) {
+  const currency = parseCurrency(
+    session?.currency ||
+      session?.currency_code ||
+      fallback?.currency ||
+      "mxn"
+  );
 
-  const fromQuery = reqUrl
-    ? reqUrl.searchParams.getAll("stripe_session_ids").length
-      ? reqUrl.searchParams.getAll("stripe_session_ids")
-      : safeStr(reqUrl.searchParams.get("stripe_session_ids") || "").split(",")
-    : [];
+  const amountTotalCents = Math.max(
+    0,
+    Math.round(
+      safeNum(
+        session?.amount_total ??
+          session?.amount_total_cents ??
+          fallback?.amount_total_cents ??
+          0
+      )
+    )
+  );
 
-  const list = Array.isArray(fromBody) && fromBody.length ? fromBody : fromQuery;
-  return clampList(list, 120);
+  const balanceFeeCents = Math.max(
+    0,
+    Math.round(
+      safeNum(
+        session?.balance_transaction?.fee ??
+          session?.payment_intent?.charges?.data?.[0]?.balance_transaction?.fee ??
+          session?.charges?.data?.[0]?.balance_transaction?.fee ??
+          0
+      )
+    )
+  );
+
+  const feePercent = safeNum(fallback?.fee_percent, 0);
+  const feeFixedMxn = safeNum(fallback?.fee_fixed_mxn, 0);
+  const fx = fxToMXN(currency);
+
+  const dynamicFeeMxn =
+    balanceFeeCents > 0 ? balanceFeeCents / 100 : (amountTotalCents / 100) * (feePercent / 100);
+
+  const totalFeeMxn = Math.max(0, dynamicFeeMxn + feeFixedMxn * fx);
+
+  return {
+    session_id: safeStr(session?.id || fallback?.session_id || ""),
+    payment_intent_id: safeStr(
+      typeof session?.payment_intent === "string"
+        ? session.payment_intent
+        : session?.payment_intent?.id || fallback?.payment_intent_id || ""
+    ),
+    currency,
+    amount_total_cents: amountTotalCents,
+    amount_total_mxn: amountTotalCents / 100,
+    fee_cents: balanceFeeCents,
+    fee_mxn: Math.round(totalFeeMxn * 100) / 100,
+    fee_percent: feePercent,
+    fee_fixed_mxn: feeFixedMxn,
+    provider: "stripe",
+  };
 }
 
-function parseOrgId(body = {}, reqUrl = null) {
-  const fromBody = safeStr(body?.org_id || body?.organization_id || body?.orgId || "").trim();
-  if (fromBody) return fromBody;
+async function fetchStripeSession(stripe, sessionId) {
+  if (!stripe || !sessionId) return null;
 
-  const fromQuery = reqUrl
-    ? safeStr(reqUrl.searchParams.get("org_id") || reqUrl.searchParams.get("orgId") || "").trim()
-    : "";
-
-  return fromQuery;
+  try {
+    return await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["payment_intent", "payment_intent.charges.data.balance_transaction"],
+    });
+  } catch {
+    return null;
+  }
 }
 
-async function computeFeesForSessions(sessions, concurrency = 5) {
+async function fetchStripePaymentIntent(stripe, paymentIntentId) {
+  if (!stripe || !paymentIntentId) return null;
+
+  try {
+    return await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["charges.data.balance_transaction"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function computeFeesForSessions(stripe, sessions = []) {
   const details = [];
   let total_fee_mxn = 0;
 
-  for (let i = 0; i < sessions.length; i += concurrency) {
-    const slice = sessions.slice(i, i + concurrency);
-    const chunk = await Promise.all(
-      slice.map((id) =>
-        feeFromSession(id).catch(() => ({
-          session_id: id,
-          fee_mxn: 0,
-          fee_currency: null,
-          fee_cents: 0,
-          payment_intent_id: null,
-          charge_id: null,
-          balance_transaction_id: null,
-          error: "stripe_lookup_failed",
-        }))
-      )
-    );
+  for (const item of sessions) {
+    const base = {
+      session_id: item.session_id,
+      payment_intent_id: item.payment_intent_id,
+      currency: item.currency,
+      amount_total_cents: item.amount_total_cents,
+      fee_percent: item.fee_percent,
+      fee_fixed_mxn: item.fee_fixed_mxn,
+    };
 
-    for (const item of chunk) {
-      details.push(item);
-      total_fee_mxn += safeNum(item?.fee_mxn, 0);
+    let session = null;
+
+    if (item.session_id) {
+      session = await fetchStripeSession(stripe, item.session_id);
     }
+
+    if (!session && item.payment_intent_id) {
+      session = await fetchStripePaymentIntent(stripe, item.payment_intent_id);
+    }
+
+    const normalized = normalizeSessionDetails(session, base);
+    details.push(normalized);
+    total_fee_mxn += safeNum(normalized.fee_mxn, 0);
   }
 
   return {
@@ -303,7 +251,7 @@ async function handle(req) {
     const body = req.method === "GET" ? {} : await req.json().catch(() => ({}));
 
     const orgId = parseOrgId(body, url);
-    const sessions = normalizeSessionsInput(body, url);
+    const sessions = parseSessionsInput(body, url);
     const concurrency = clampInt(body?.concurrency ?? url.searchParams.get("concurrency"), 1, 10, 5);
 
     if (!isUuid(orgId)) {
@@ -312,6 +260,11 @@ async function handle(req) {
 
     const auth = await authorize(req, sb, orgId);
     if (!auth.ok) return auth.res;
+
+    const stripe = stripeClient();
+    if (!stripe) {
+      return json(500, { ok: false, error: "STRIPE_SECRET_KEY no configurada" });
+    }
 
     if (!sessions.length) {
       return json(200, {
@@ -323,11 +276,26 @@ async function handle(req) {
       });
     }
 
-    const { total_fee_mxn, details } = await computeFeesForSessions(sessions, concurrency);
+    const limit = Math.max(1, Math.min(10, concurrency));
+    const batched = [];
+    for (let i = 0; i < sessions.length; i += limit) {
+      batched.push(sessions.slice(i, i + limit));
+    }
+
+    let total_fee_mxn = 0;
+    const details = [];
+
+    for (const chunk of batched) {
+      const result = await computeFeesForSessions(stripe, chunk);
+      total_fee_mxn += safeNum(result.total_fee_mxn, 0);
+      details.push(...result.details);
+    }
+
+    total_fee_mxn = Math.round(total_fee_mxn * 100) / 100;
 
     await writeAudit(sb, {
       organization_id: orgId,
-      actor_email: normEmail(auth.user?.email),
+      actor_email: normalizeEmail(auth.user?.email),
       actor_user_id: auth.user?.id || null,
       action: "stripe.fees.compute",
       entity: "stripe",
@@ -335,7 +303,7 @@ async function handle(req) {
       summary: `Computed Stripe fees for ${sessions.length} sessions`,
       meta: {
         count: sessions.length,
-        concurrency,
+        concurrency: limit,
         total_fee_mxn,
         role: auth.role,
         source: "api/stripe/fees",
