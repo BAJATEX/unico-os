@@ -149,70 +149,77 @@ async function authorize(req, sb, orgId) {
   return { ok: true, user, myRole };
 }
 
-export async function POST(req) {
-  try {
-    const sb = serverSupabase();
-    const body = await req.json().catch(() => ({}));
+async function handleInvite(req) {
+  const sb = serverSupabase();
+  if (!sb) {
+    return json(500, { ok: false, error: "Supabase no configurado" });
+  }
 
-    const orgId = resolveOrgId(body);
-    const email = cleanEmail(body?.email);
-    const role = cleanRole(body?.role || "viewer");
+  const body = await req.json().catch(() => ({}));
+  const orgId = resolveOrgId(body);
+  const email = cleanEmail(body?.email);
+  const role = cleanRole(body?.role || "viewer");
 
-    if (!isUuid(orgId)) {
-      return json(400, { ok: false, error: "org_id inválido" });
-    }
+  if (!isUuid(orgId)) {
+    return json(400, { ok: false, error: "org_id inválido" });
+  }
 
-    if (!email || !email.includes("@")) {
-      return json(400, { ok: false, error: "Email inválido" });
-    }
+  if (!email || !email.includes("@")) {
+    return json(400, { ok: false, error: "Email inválido" });
+  }
 
-    if (!ALLOWED_ROLES.has(role)) {
-      return json(400, { ok: false, error: "Rol inválido" });
-    }
+  if (!ALLOWED_ROLES.has(role)) {
+    return json(400, { ok: false, error: "Rol inválido" });
+  }
 
-    const auth = await authorize(req, sb, orgId);
-    if (!auth.ok) return auth.res;
+  const auth = await authorize(req, sb, orgId);
+  if (!auth.ok) return auth.res;
 
-    const result = await upsertInvite(sb, {
-      org_id: orgId,
-      organization_id: orgId,
-      email,
-      role,
-      is_active: true,
-    });
+  const result = await upsertInvite(sb, {
+    org_id: orgId,
+    organization_id: orgId,
+    email,
+    role,
+    is_active: true,
+  });
 
-    await writeAudit(sb, {
-      organization_id: orgId,
-      org_id: orgId,
-      actor_email: normEmail(auth.user?.email),
-      actor_user_id: auth.user?.id || null,
-      action: "admin_users.invite",
-      entity: "admin_users",
-      entity_id: email,
-      summary: `${result.mode === "update" ? "Updated" : "Created"} invite for ${email} as ${role}`,
-      after: {
-        mode: result.mode,
-        email,
-        role,
-        is_active: true,
-      },
-      meta: {
-        mode: result.mode,
-        role,
-        source: "api/invite",
-        actor_role: auth.myRole,
-      },
-      ip: req.headers.get("x-forwarded-for") || null,
-      user_agent: req.headers.get("user-agent") || null,
-    });
-
-    return json(200, {
-      ok: true,
+  await writeAudit(sb, {
+    organization_id: orgId,
+    org_id: orgId,
+    actor_email: normEmail(auth.user?.email),
+    actor_user_id: auth.user?.id || null,
+    action: "admin_users.invite",
+    entity: "admin_users",
+    entity_id: email,
+    summary: `${result.mode === "update" ? "Updated" : "Created"} invite for ${email} as ${role}`,
+    after: {
       mode: result.mode,
       email,
       role,
-      org_id: orgId,
-    });
+      is_active: true,
+    },
+    meta: {
+      mode: result.mode,
+      role,
+      source: "api/invite",
+      actor_role: auth.myRole,
+    },
+    ip: req.headers.get("x-forwarded-for") || null,
+    user_agent: req.headers.get("user-agent") || null,
+  });
+
+  return json(200, {
+    ok: true,
+    mode: result.mode,
+    email,
+    role,
+    org_id: orgId,
+  });
+}
+
+export async function POST(req) {
+  try {
+    return await handleInvite(req);
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
   }
@@ -220,4 +227,12 @@ export async function POST(req) {
 
 export async function PATCH(req) {
   return POST(req);
+}
+
+export async function GET() {
+  return json(405, { ok: false, error: "Method not allowed" });
+}
+
+export async function OPTIONS() {
+  return json(204, {});
 }
