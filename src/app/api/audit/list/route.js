@@ -38,39 +38,34 @@ function clampInt(v, min, max, fallback = min) {
   return Math.max(min, Math.min(max, n));
 }
 
-function normalizeText(v) {
-  return safeStr(v).trim();
-}
-
 function normalizeLower(v) {
   return safeStr(v).trim().toLowerCase();
 }
 
-function buildQueryFilters(q, search, entity, action) {
-  let query = q;
+function normalizeText(v) {
+  return safeStr(v).trim();
+}
 
-  if (entity) {
-    query = query.eq("entity", entity);
-  }
+function parseOrgId(req, url) {
+  const fromQuery = normalizeText(url.searchParams.get("org_id") || url.searchParams.get("orgId") || url.searchParams.get("organization_id") || "");
+  return fromQuery;
+}
 
-  if (action) {
-    query = query.eq("action", action);
-  }
+function parseLimit(url) {
+  const raw = url.searchParams.get("limit") || "50";
+  return clampInt(raw, 1, 250, 50);
+}
 
-  if (search) {
-    const s = normalizeLower(search);
-    query = query.or(
-      [
-        `summary.ilike.%${s}%`,
-        `action.ilike.%${s}%`,
-        `entity.ilike.%${s}%`,
-        `actor_email.ilike.%${s}%`,
-        `entity_id.ilike.%${s}%`,
-      ].join(",")
-    );
-  }
+function parseSearch(url) {
+  return normalizeText(url.searchParams.get("search") || url.searchParams.get("q") || "");
+}
 
-  return query;
+function parseEntity(url) {
+  return normalizeText(url.searchParams.get("entity") || "");
+}
+
+function parseAction(url) {
+  return normalizeText(url.searchParams.get("action") || "");
 }
 
 function normalizeRow(row) {
@@ -95,6 +90,33 @@ function normalizeRow(row) {
   };
 }
 
+function buildQueryFilters(query, search, entity, action) {
+  let q = query;
+
+  if (entity) {
+    q = q.eq("entity", entity);
+  }
+
+  if (action) {
+    q = q.eq("action", action);
+  }
+
+  if (search) {
+    const s = normalizeLower(search);
+    q = q.or(
+      [
+        `summary.ilike.%${s}%`,
+        `action.ilike.%${s}%`,
+        `entity.ilike.%${s}%`,
+        `actor_email.ilike.%${s}%`,
+        `entity_id.ilike.%${s}%`,
+      ].join(",")
+    );
+  }
+
+  return q;
+}
+
 async function authorize(req, sb, orgId) {
   const token = getBearerToken(req);
   const { user, error: authErr } = await requireUserFromToken(sb, token);
@@ -112,7 +134,7 @@ async function authorize(req, sb, orgId) {
 }
 
 async function readAuditRows(sb, orgId, limit, entity, action, search) {
-  let q = sb
+  let query = sb
     .from("audit_log")
     .select(
       [
@@ -136,14 +158,45 @@ async function readAuditRows(sb, orgId, limit, entity, action, search) {
     .order("created_at", { ascending: false })
     .limit(limit);
 
-  q = applyOrgFilter(q, orgId);
-  q = buildQueryFilters(q, search, entity, action);
+  query = applyOrgFilter(query, orgId);
+  query = buildQueryFilters(query, search, entity, action);
 
-  const { data, error } = await q;
+  const { data, error } = await query;
   return {
     data: Array.isArray(data) ? data : [],
     error,
   };
+}
+
+async function maybeAuditRead(sb, orgId, auth, rows, params) {
+  try {
+    await writeAudit(sb, {
+      organization_id: orgId,
+      org_id: orgId,
+      actor_email: normEmail(auth.user?.email),
+      actor_user_id: auth.user?.id || null,
+      action: "audit.read",
+      entity: "audit_log",
+      entity_id: String(rows?.length || 0),
+      summary: `Read audit rows${params.search ? ` · search=${params.search}` : ""}`,
+      before: null,
+      after: {
+        rows: Array.isArray(rows) ? rows.length : 0,
+      },
+      meta: {
+        role: auth.role,
+        limit: params.limit,
+        entity: params.entity || null,
+        action_filter: params.action || null,
+        search: params.search || null,
+        source: "api/audit/list",
+      },
+      ip: params.ip || null,
+      user_agent: params.user_agent || null,
+    });
+  } catch {
+    // no-op: lectura debe seguir aunque el log falle
+  }
 }
 
 export async function GET(req) {
@@ -151,11 +204,11 @@ export async function GET(req) {
     const sb = serverSupabase();
     const url = new URL(req.url);
 
-    const orgId = safeStr(url.searchParams.get("org_id") || url.searchParams.get("orgId") || "").trim();
-    const limit = clampInt(url.searchParams.get("limit"), 1, 200, 80);
-    const entity = normalizeText(url.searchParams.get("entity"));
-    const action = normalizeText(url.searchParams.get("action"));
-    const search = normalizeText(url.searchParams.get("q") || url.searchParams.get("search"));
+    const orgId = parseOrgId(req, url);
+    const limit = parseLimit(url);
+    const search = parseSearch(url);
+    const entity = parseEntity(url);
+    const action = parseAction(url);
 
     if (!isUuid(orgId)) {
       return json(400, { ok: false, error: "org_id inválido" });
@@ -164,37 +217,39 @@ export async function GET(req) {
     const auth = await authorize(req, sb, orgId);
     if (!auth.ok) return auth.res;
 
-    const { data, error } = await readAuditRows(sb, orgId, limit, entity, action, search);
-
-    if (error) {
-      return json(200, { ok: true, rows: [] });
+    const result = await readAuditRows(sb, orgId, limit, entity, action, search);
+    if (result.error) {
+      return json(500, { ok: false, error: result.error.message || "No se pudo leer auditoría." });
     }
 
-    await writeAudit(sb, {
-      organization_id: orgId,
-      actor_email: normEmail(auth.user?.email),
-      actor_user_id: auth.user?.id || null,
-      action: "audit.list",
-      entity: "audit_log",
-      entity_id: String(limit),
-      summary: "Listed audit log",
-      meta: {
+    const rows = (result.data || []).map(normalizeRow).filter(Boolean);
+
+    await maybeAuditRead(
+      sb,
+      orgId,
+      auth,
+      rows,
+      {
         limit,
-        entity: entity || null,
-        action: action || null,
-        search: search || null,
-        role: auth.role,
-        source: "api/audit/list",
-      },
-      ip: req.headers.get("x-forwarded-for") || null,
-      user_agent: req.headers.get("user-agent") || null,
-    });
+        entity,
+        action,
+        search,
+        ip: req.headers.get("x-forwarded-for") || null,
+        user_agent: req.headers.get("user-agent") || null,
+      }
+    );
 
     return json(200, {
       ok: true,
       org_id: orgId,
+      role: auth.role,
+      count: rows.length,
       limit,
-      rows: (data || []).map(normalizeRow).filter(Boolean),
+      entity: entity || "",
+      action: action || "",
+      search: search || "",
+      rows,
+      updated_at: new Date().toISOString(),
     });
   } catch (e) {
     return json(500, { ok: false, error: String(e?.message || e) });
@@ -203,4 +258,12 @@ export async function GET(req) {
 
 export async function POST(req) {
   return GET(req);
+}
+
+export async function PATCH(req) {
+  return GET(req);
+}
+
+export async function OPTIONS() {
+  return json(204, {});
 }
