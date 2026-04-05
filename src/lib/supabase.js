@@ -1,18 +1,28 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@supabase/supabase-js";
 
-[span_4](start_span)// Extraído de la estructura de tu proyecto[span_4](end_span)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-[span_5](start_span)[span_6](start_span)// Corrección: Intenta leer ambas variables para evitar el error de "Invalid API Key"[span_5](end_span)[span_6](end_span)
-const supabaseAnonKey = 
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Error: Faltan variables de entorno de Supabase.');
+if (!url || !anonKey) {
+  throw new Error("Faltan variables de entorno de Supabase");
 }
 
-export const supabase = createClient(
-  supabaseUrl || '', 
-  supabaseAnonKey || ''
-);
+/**
+ * Cliente público (browser):
+ * - SOLO anon key
+ * - Requiere RLS en Supabase
+ */
+export const supabase = createClient(url, anonKey, {
+  global: {
+    headers: {
+      "x-client-info": "unicos-admin-web",
+    },
+  },
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
+
+export const SUPABASE_CONFIGURED = true;
