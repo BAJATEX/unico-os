@@ -57,6 +57,7 @@ export default function AuthCallbackPage() {
         const orgFromQuery = safeStr(
           url.searchParams.get("org_id") ||
             url.searchParams.get("orgId") ||
+            url.searchParams.get("organization_id") ||
             ""
         ).trim();
 
@@ -64,7 +65,10 @@ export default function AuthCallbackPage() {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         } else if (tokenHash) {
-          const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type,
+          });
           if (error) throw error;
         }
 
@@ -85,9 +89,7 @@ export default function AuthCallbackPage() {
           orgFromQuery ||
           safeStr(who?.organization_id || who?.default_organization_id || "");
 
-        if (orgId) {
-          syncOrgToStorage(orgId);
-        }
+        if (orgId) syncOrgToStorage(orgId);
 
         if (!active) return;
 
@@ -95,7 +97,9 @@ export default function AuthCallbackPage() {
         router.replace("/");
       } catch (e) {
         if (!active) return;
-        setMessage(String(e?.message || "No pude validar tu acceso. Pide un nuevo enlace."));
+        setMessage(
+          String(e?.message || "No pude validar tu acceso. Pide un nuevo enlace.")
+        );
       } finally {
         if (active) setBusy(false);
       }
@@ -138,7 +142,9 @@ export default function AuthCallbackPage() {
           {busy ? (
             <div className="mt-6 flex items-center justify-center gap-3 text-slate-400">
               <span className="h-3 w-3 rounded-full bg-sky-400 animate-pulse" />
-              <span className="text-sm font-bold">Sincronizando sesión y organización...</span>
+              <span className="text-sm font-bold">
+                Sincronizando sesión y organización...
+              </span>
             </div>
           ) : null}
         </section>
