@@ -1,29 +1,39 @@
+// src/app/page.js
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import clsx from "clsx";
 import {
-  Bot,
+  BarChart3,
   Boxes,
+  Bot,
   CircleDollarSign,
+  ExternalLink,
+  Eye,
   Gauge,
-  History,
+  Layers3,
   Loader2,
+  PackageSearch,
   RefreshCcw,
-  Send,
   Settings2,
   ShieldCheck,
   ShoppingBag,
-  Sparkles,
   Store,
   Truck,
+  Wand2,
+  X,
+  Sparkles,
+  ChevronDown,
+  History,
+  Search,
+  Send,
+  RefreshCcw as RefreshIcon,
+  AlertTriangle,
 } from "lucide-react";
 
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import AiDock from "@/app/ai-dock";
-
-const LOGIN_EMAIL_PLACEHOLDER = "admin@empresa-demo.com";
 
 function safeStr(v, d = "") {
   return typeof v === "string" ? v : v == null ? d : String(v);
@@ -233,7 +243,7 @@ function LoginScreen({ onLogin, onPasswordLogin, loading, error }) {
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder={LOGIN_EMAIL_PLACEHOLDER}
+                    placeholder="admin@empresa-demo.com"
                     className="unicos-input w-full rounded-2xl px-4 py-4 text-sm outline-none"
                   />
                 </label>
@@ -659,7 +669,7 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings, onLogout }) 
                   <p className="font-black text-white">Sincronización</p>
                 </div>
                 <p className="mt-3 text-sm text-slate-300 leading-relaxed">
-                  UnicOs queda enlazado con Score Store por Supabase compartido, `/api/me`, `audit`, IA y servicios de Stripe/Envía.
+                  UnicOs queda enlazado con Score Store por Supabase compartido, /api/me, /api/score/site-settings, auditoría, AI y servicios de Stripe/Envía.
                 </p>
               </Card>
             </div>
@@ -891,6 +901,7 @@ export default function Page() {
                   onClick={() => setView("dashboard")}
                   className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
                 >
+                  <Eye size={16} />
                   Volver al panel
                 </button>
 
@@ -916,13 +927,23 @@ export default function Page() {
   }
 
   return (
-    <DashboardView
-      token={sessionToken}
-      orgId={orgId}
-      role={role}
-      orgName={orgName}
-      onGoSettings={() => setView("settings")}
-      onLogout={handleLogout}
-    />
+    <>
+      <DashboardView
+        token={sessionToken}
+        orgId={orgId}
+        role={role}
+        orgName={orgName}
+        onGoSettings={() => setView("settings")}
+        onLogout={handleLogout}
+      />
+
+      <button
+        type="button"
+        onClick={handleLogout}
+        className="unicos-btn fixed bottom-4 right-4 z-50 rounded-[18px] border border-white/10 bg-[rgba(8,18,34,0.88)] px-5 py-3 text-xs font-black text-white shadow-2xl hover:bg-[rgba(8,18,34,0.95)] hover:border-rose-400/20 hover:text-rose-200"
+      >
+        Cerrar sesión
+      </button>
+    </>
   );
 }
