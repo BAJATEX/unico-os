@@ -1,28 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 
+// Extraído de unico-os-main/src/lib/supabase.js
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!url || !anonKey) {
-  throw new Error("Faltan variables de entorno de Supabase");
+// CORRECCIÓN: Fallback dinámico para evitar el error de "Invalid API Key"
+const key = 
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+if (!url || !key) {
+  console.warn("Supabase credentials missing in client-side. Check Vercel env vars.");
 }
 
-/**
- * Cliente público (browser):
- * - SOLO anon key
- * - Requiere RLS en Supabase
- */
-export const supabase = createClient(url, anonKey, {
-  global: {
-    headers: {
-      "x-client-info": "unicos-admin-web",
-    },
-  },
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
-
-export const SUPABASE_CONFIGURED = true;
+export const supabase = createClient(url || "", key || "");
