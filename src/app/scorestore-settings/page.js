@@ -1,12 +1,38 @@
 // src/app/scorestore-settings/page.js
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import clsx from "clsx";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Eye,
+  Globe,
+  Home,
+  Loader2,
+  Mail,
+  Palette,
+  Phone,
+  RefreshCcw,
+  Save,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  ToggleLeft,
+  ToggleRight,
+  Truck,
+  Wand2,
+} from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 const SCORESTORE_URL =
   process.env.NEXT_PUBLIC_SCORESTORE_URL || "https://scorestore.vercel.app";
 
 const safeStr = (v, d = "") => (typeof v === "string" ? v : v == null ? d : String(v));
+
 const safeBool = (v, d = false) => {
   if (typeof v === "boolean") return v;
   if (v === "true" || v === "1" || v === 1) return true;
@@ -24,7 +50,7 @@ const deepClone = (obj) => {
 
 const getInitialForm = (settings) => ({
   org_id: safeStr(settings?.org_id || ""),
-  hero_title: safeStr(settings?.hero_title || ""),
+  hero_title: safeStr(settings?.hero_title || "SCORE STORE"),
   hero_image: safeStr(settings?.hero_image || ""),
   promo_active: safeBool(settings?.promo_active, false),
   promo_text: safeStr(settings?.promo_text || ""),
@@ -56,81 +82,320 @@ const getInitialForm = (settings) => ({
   },
 });
 
+function Shell({ children }) {
+  return (
+    <main className="min-h-screen px-4 py-6 md:py-8 unicos-shell">
+      <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+    </main>
+  );
+}
+
+function Panel({ className = "", children }) {
+  return (
+    <section
+      className={clsx(
+        "unicos-panel overflow-hidden border border-white/10 bg-[rgba(8,18,34,0.86)] shadow-2xl",
+        className
+      )}
+    >
+      {children}
+    </section>
+  );
+}
+
+function SectionTitle({ eyebrow, title, subtitle, icon: Icon }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">{eyebrow}</p>
+        <h2 className="mt-2 text-2xl font-black tracking-tight text-white">{title}</h2>
+        {subtitle ? <p className="mt-2 text-sm leading-relaxed text-slate-300">{subtitle}</p> : null}
+      </div>
+      {Icon ? (
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sky-300">
+          <Icon size={18} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Pill({ children, tone = "blue" }) {
+  const styles = {
+    blue: "border-sky-400/20 bg-sky-500/10 text-sky-100",
+    emerald: "border-emerald-400/20 bg-emerald-500/10 text-emerald-100",
+    amber: "border-amber-400/20 bg-amber-500/10 text-amber-100",
+    rose: "border-rose-400/20 bg-rose-500/10 text-rose-100",
+    white: "border-white/10 bg-white/5 text-white",
+  };
+
+  return (
+    <span className={clsx("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em]", styles[tone] || styles.blue)}>
+      {children}
+    </span>
+  );
+}
+
+function Field({ label, value, onChange, placeholder = "", type = "text", hint = "", icon: Icon }) {
+  return (
+    <label className="block">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">{label}</span>
+        {hint ? <span className="text-[10px] font-bold text-slate-500">{hint}</span> : null}
+      </div>
+      <div className="relative">
+        {Icon ? <Icon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} /> : null}
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={clsx(
+            "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition",
+            Icon ? "pl-10" : "",
+            "placeholder:text-slate-500 focus:border-sky-400/40 focus:bg-white/7"
+          )}
+        />
+      </div>
+    </label>
+  );
+}
+
+function TextArea({ label, value, onChange, placeholder = "", rows = 3, hint = "" }) {
+  return (
+    <label className="block">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">{label}</span>
+        {hint ? <span className="text-[10px] font-bold text-slate-500">{hint}</span> : null}
+      </div>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full resize-y rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-sky-400/40 focus:bg-white/7"
+      />
+    </label>
+  );
+}
+
+function Toggle({ label, value, onChange, hint = "" }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      className="flex w-full items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left transition hover:bg-white/8"
+    >
+      <div>
+        <p className="text-sm font-black text-white">{label}</p>
+        {hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
+      </div>
+      <span className={clsx("flex items-center gap-2 rounded-full px-3 py-2 text-xs font-black", value ? "bg-emerald-500/15 text-emerald-100 border border-emerald-400/20" : "bg-white/5 text-slate-300 border border-white/10")}>
+        {value ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+        {value ? "ON" : "OFF"}
+      </span>
+    </button>
+  );
+}
+
+function normalizeSettingsPayload(payload = {}) {
+  const src = payload?.site_settings || payload?.settings || payload?.store || payload || {};
+
+  return {
+    org_id: safeStr(src.org_id || src.organization_id || ""),
+    hero_title: safeStr(src.hero_title || "SCORE STORE"),
+    hero_image: safeStr(src.hero_image || ""),
+    promo_active: safeBool(src.promo_active, false),
+    promo_text: safeStr(src.promo_text || ""),
+    pixel_id: safeStr(src.pixel_id || ""),
+    maintenance_mode: safeBool(src.maintenance_mode, false),
+    season_key: safeStr(src.season_key || "default"),
+    theme: {
+      accent: safeStr(src.theme?.accent || "#e10600"),
+      accent2: safeStr(src.theme?.accent2 || "#111111"),
+      particles: safeBool(src.theme?.particles, true),
+    },
+    home: {
+      footer_note: safeStr(src.home?.footer_note || ""),
+      shipping_note: safeStr(src.home?.shipping_note || ""),
+      returns_note: safeStr(src.home?.returns_note || ""),
+      support_hours: safeStr(src.home?.support_hours || ""),
+    },
+    socials: {
+      facebook: safeStr(src.socials?.facebook || ""),
+      instagram: safeStr(src.socials?.instagram || ""),
+      youtube: safeStr(src.socials?.youtube || ""),
+      tiktok: safeStr(src.socials?.tiktok || ""),
+    },
+    contact: {
+      email: safeStr(src.contact?.email || src.contact_email || ""),
+      phone: safeStr(src.contact?.phone || src.contact_phone || ""),
+      whatsapp_e164: safeStr(src.contact?.whatsapp_e164 || src.whatsapp_e164 || ""),
+      whatsapp_display: safeStr(src.contact?.whatsapp_display || src.whatsapp_display || ""),
+    },
+  };
+}
+
 export default function ScorestoreSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sessionToken, setSessionToken] = useState("");
   const [settings, setSettings] = useState(null);
   const [form, setForm] = useState(getInitialForm(null));
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-
-  const token = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return localStorage.getItem("unicos_token") || "";
-  }, []);
+  const [status, setStatus] = useState("Conectando al panel...");
+  const [copied, setCopied] = useState("");
 
   const apiHeaders = useMemo(() => {
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, [token]);
+    return sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {};
+  }, [sessionToken]);
 
-  const copyText = async (value) => {
+  const previewUrl = SCORESTORE_URL || "https://scorestore.vercel.app";
+  const heroPreview = form.hero_title || "SCORE STORE";
+  const activeTheme = form.theme?.accent || "#e10600";
+
+  const copyText = useCallback(async (value) => {
     try {
       await navigator.clipboard.writeText(String(value || ""));
-      setSuccess("Copiado al portapapeles.");
-      window.setTimeout(() => setSuccess(""), 1500);
+      setCopied("Copiado al portapapeles.");
+      window.setTimeout(() => setCopied(""), 1600);
     } catch {
       setError("No se pudo copiar.");
     }
-  };
+  }, []);
 
-  const load = async () => {
-    setLoading(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const res = await fetch("/api/score/site-settings", {
-        method: "GET",
-        headers: apiHeaders,
-        cache: "no-store",
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "No se pudieron cargar los ajustes");
+  const load = useCallback(
+    async (tokenArg = sessionToken) => {
+      if (!tokenArg) {
+        setLoading(false);
+        setStatus("Sesión requerida para editar ajustes.");
+        setError("Inicia sesión en UnicOs para cargar este panel.");
+        return;
       }
 
-      setSettings(data);
-      setForm(getInitialForm(data));
-    } catch (e) {
-      setError(String(e?.message || e || "Error desconocido"));
-    } finally {
-      setLoading(false);
-    }
-  };
+      setLoading(true);
+      setError("");
+      setSuccess("");
+      setStatus("Cargando ajustes públicos...");
+
+      try {
+        const res = await fetch("/api/score/site-settings", {
+          method: "GET",
+          headers: tokenArg ? { Authorization: `Bearer ${tokenArg}` } : {},
+          cache: "no-store",
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.error || "No se pudieron cargar los ajustes");
+        }
+
+        const normalized = normalizeSettingsPayload(data);
+        setSettings(normalized);
+        setForm(getInitialForm(normalized));
+        setStatus("Ajustes listos para editar.");
+      } catch (e) {
+        setError(String(e?.message || e || "Error desconocido"));
+        setStatus("No se pudieron cargar los ajustes.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sessionToken]
+  );
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let alive = true;
+    let sub = null;
+
+    const boot = async () => {
+      if (!supabase) {
+        if (!alive) return;
+        setLoading(false);
+        setStatus("Supabase no está configurado.");
+        setError("Falta conectar la instancia de Supabase en este entorno.");
+        return;
+      }
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!alive) return;
+
+        const token = session?.access_token || "";
+        setSessionToken(token);
+
+        if (!token) {
+          setLoading(false);
+          setStatus("Inicia sesión en UnicOs.");
+          return;
+        }
+
+        await load(token);
+      } catch (e) {
+        if (!alive) return;
+        setLoading(false);
+        setStatus("No se pudo validar la sesión.");
+        setError(String(e?.message || e));
+      }
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (!alive) return;
+        const nextToken = session?.access_token || "";
+        setSessionToken(nextToken);
+
+        if (!nextToken) {
+          setSettings(null);
+          setForm(getInitialForm(null));
+          setLoading(false);
+          setStatus("Sesión cerrada.");
+          return;
+        }
+
+        load(nextToken);
+      });
+
+      sub = subscription || null;
+    };
+
+    boot();
+
+    return () => {
+      alive = false;
+      sub?.unsubscribe?.();
+    };
+  }, [load]);
 
   const updateField = (section, key, value) => {
     setForm((prev) => {
       const next = deepClone(prev);
+
       if (section) {
         next[section] = next[section] || {};
         next[section][key] = value;
       } else {
         next[key] = value;
       }
+
       return next;
     });
   };
 
   const onSave = async () => {
+    if (!sessionToken) {
+      setError("Debes iniciar sesión nuevamente.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     setSuccess("");
+    setStatus("Guardando ajustes...");
 
     try {
       const payload = {
@@ -159,12 +424,10 @@ export default function ScorestoreSettingsPage() {
           youtube: safeStr(form.socials?.youtube || ""),
           tiktok: safeStr(form.socials?.tiktok || ""),
         },
-        contact: {
-          email: safeStr(form.contact?.email || ""),
-          phone: safeStr(form.contact?.phone || ""),
-          whatsapp_e164: safeStr(form.contact?.whatsapp_e164 || ""),
-          whatsapp_display: safeStr(form.contact?.whatsapp_display || ""),
-        },
+        contact_email: safeStr(form.contact?.email || ""),
+        contact_phone: safeStr(form.contact?.phone || ""),
+        whatsapp_e164: safeStr(form.contact?.whatsapp_e164 || ""),
+        whatsapp_display: safeStr(form.contact?.whatsapp_display || ""),
       };
 
       const res = await fetch("/api/score/site-settings", {
@@ -181,318 +444,121 @@ export default function ScorestoreSettingsPage() {
         throw new Error(data?.error || "No se pudieron guardar los ajustes");
       }
 
-      setSettings(data.site_settings || data);
-      setForm(getInitialForm(data.site_settings || data));
+      const normalized = normalizeSettingsPayload(data);
+      setSettings(normalized);
+      setForm(getInitialForm(normalized));
       setSuccess("Ajustes guardados correctamente.");
+      setStatus("Sincronizado.");
     } catch (e) {
       setError(String(e?.message || e || "Error desconocido"));
+      setStatus("No se pudo guardar.");
     } finally {
       setSaving(false);
     }
   };
 
-  const field = (label, value, onChange, placeholder = "") => (
-    <label className="block">
-      <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-white/55">
-        {label}
-      </span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:bg-white/8"
-      />
-    </label>
-  );
-
-  const textarea = (label, value, onChange, placeholder = "", rows = 4) => (
-    <label className="block">
-      <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-white/55">
-        {label}
-      </span>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        rows={rows}
-        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:bg-white/8"
-      />
-    </label>
-  );
+  const scoreStoreHref = previewUrl.startsWith("http") ? previewUrl : `https://${previewUrl}`;
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-white">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_right,rgba(225,6,0,0.14),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(14,165,233,0.08),transparent_35%)]" />
-      <section className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="rounded-[28px] border border-white/10 bg-[rgba(8,18,34,0.82)] p-5 shadow-2xl shadow-black/30 backdrop-blur-xl sm:p-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.28em] text-white/70">
-                Score Store Settings
-              </div>
-              <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
-                Centro de configuración conectado
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-white/70">
-                Ajustes públicos del ecosistema Score Store alineados con el admin, el frontend y la tienda.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:items-end">
-              <a
-                href={SCORESTORE_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
-              >
-                Abrir Score Store
-              </a>
-              <button
-                type="button"
-                onClick={() => copyText(SCORESTORE_URL)}
-                className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
-              >
-                Copiar URL pública
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4 lg:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="text-xs font-black uppercase tracking-[0.2em] text-white/60">
-                URL pública
-              </div>
-              <div className="mt-2 break-all text-sm font-bold text-white">{SCORESTORE_URL}</div>
-              <div className="mt-4 text-xs text-white/50">
-                Fuente de navegación para la tienda oficial.
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 lg:col-span-2">
-              <div className="text-xs font-black uppercase tracking-[0.2em] text-white/60">
-                Estado
-              </div>
-
-              {loading ? (
-                <p className="mt-3 text-sm text-white/70">Cargando ajustes…</p>
-              ) : error ? (
-                <p className="mt-3 text-sm font-semibold text-red-300">{error}</p>
-              ) : (
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-white/5 p-4">
-                    <div className="text-xs font-black uppercase tracking-[0.16em] text-white/50">
-                      Promo activa
-                    </div>
-                    <div className="mt-1 text-sm font-bold">
-                      {settings?.promo_active ? "Sí" : "No"}
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-white/5 p-4">
-                    <div className="text-xs font-black uppercase tracking-[0.16em] text-white/50">
-                      Última actualización
-                    </div>
-                    <div className="mt-1 text-sm font-bold">
-                      {safeStr(settings?.updated_at, "—")}
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-white/5 p-4 sm:col-span-2">
-                    <div className="text-xs font-black uppercase tracking-[0.16em] text-white/50">
-                      Texto promo
-                    </div>
-                    <div className="mt-1 text-sm font-bold">
-                      {safeStr(settings?.promo_text, "Sin texto activo")}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4 xl:grid-cols-2">
-            <div className="rounded-[24px] border border-white/10 bg-white/5 p-5">
-              <div className="mb-4 text-xs font-black uppercase tracking-[0.2em] text-white/60">
-                Editor rápido
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                {field("Org ID", form.org_id, (v) => updateField(null, "org_id", v), "UUID de la organización")}
-                {field("Hero title", form.hero_title, (v) => updateField(null, "hero_title", v), "Título principal")}
-                {field("Hero image", form.hero_image, (v) => updateField(null, "hero_image", v), "URL de imagen")}
-                {field("Pixel ID", form.pixel_id, (v) => updateField(null, "pixel_id", v), "Meta / Pixel")}
-                {field("Season key", form.season_key, (v) => updateField(null, "season_key", v), "default")}
-                {field("Contact email", form.contact.email, (v) => updateField("contact", "email", v), "correo")}
-                {field("Contact phone", form.contact.phone, (v) => updateField("contact", "phone", v), "teléfono")}
-                {field("WhatsApp E164", form.contact.whatsapp_e164, (v) => updateField("contact", "whatsapp_e164", v), "521...")}
-                {field("WhatsApp display", form.contact.whatsapp_display, (v) => updateField("contact", "whatsapp_display", v), "664 236 8701")}
-              </div>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={!!form.promo_active}
-                    onChange={(e) => updateField(null, "promo_active", e.target.checked)}
-                  />
-                  Promo activa
-                </label>
-
-                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={!!form.maintenance_mode}
-                    onChange={(e) => updateField(null, "maintenance_mode", e.target.checked)}
-                  />
-                  Modo mantenimiento
-                </label>
-
-                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={!!form.theme.particles}
-                    onChange={(e) => updateField("theme", "particles", e.target.checked)}
-                  />
-                  Efectos / partículas
-                </label>
-              </div>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                {field("Accent", form.theme.accent, (v) => updateField("theme", "accent", v), "#e10600")}
-                {field("Accent 2", form.theme.accent2, (v) => updateField("theme", "accent2", v), "#111111")}
-              </div>
-
-              <div className="mt-4 grid gap-4">
-                {textarea("Promo text", form.promo_text, (v) => updateField(null, "promo_text", v), "Texto promocional", 3)}
-                {textarea("Footer note", form.home.footer_note, (v) => updateField("home", "footer_note", v), "Nota de pie de página", 3)}
-                {textarea("Shipping note", form.home.shipping_note, (v) => updateField("home", "shipping_note", v), "Nota de envíos", 3)}
-                {textarea("Returns note", form.home.returns_note, (v) => updateField("home", "returns_note", v), "Nota de devoluciones", 3)}
-                {textarea("Support hours", form.home.support_hours, (v) => updateField("home", "support_hours", v), "Horario de soporte", 3)}
-              </div>
-
-              <div className="mt-4 grid gap-4">
-                {field("Facebook", form.socials.facebook, (v) => updateField("socials", "facebook", v), "URL Facebook")}
-                {field("Instagram", form.socials.instagram, (v) => updateField("socials", "instagram", v), "URL Instagram")}
-                {field("YouTube", form.socials.youtube, (v) => updateField("socials", "youtube", v), "URL YouTube")}
-                {field("TikTok", form.socials.tiktok, (v) => updateField("socials", "tiktok", v), "URL TikTok")}
-              </div>
-
-              <div className="mt-5 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={onSave}
-                  disabled={saving || loading}
-                  className="inline-flex items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/15 px-5 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {saving ? "Guardando…" : "Guardar ajustes"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={load}
-                  disabled={saving || loading}
-                  className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Recargar
-                </button>
-              </div>
-
-              {success ? (
-                <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-                  {success}
-                </p>
-              ) : null}
-
-              {error ? (
-                <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                  {error}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="rounded-[24px] border border-white/10 bg-white/5 p-5">
-              <div className="mb-4 text-xs font-black uppercase tracking-[0.2em] text-white/60">
-                Vista previa de datos
-              </div>
-
-              <div className="grid gap-3">
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">
-                    Hero
-                  </p>
-                  <p className="mt-2 text-sm font-bold text-white">
-                    {safeStr(form.hero_title, "Sin título")}
-                  </p>
-                  <p className="mt-2 text-xs text-white/60 break-all">
-                    {safeStr(form.hero_image, "Sin imagen")}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">
-                    Contacto
-                  </p>
-                  <p className="mt-2 text-sm font-bold text-white">
-                    {safeStr(form.contact.email, "—")}
-                  </p>
-                  <p className="mt-1 text-sm text-white/75">
-                    {safeStr(form.contact.phone, "—")} · {safeStr(form.contact.whatsapp_display, "—")}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">
-                    Socials
-                  </p>
-                  <p className="mt-2 break-all text-sm text-white/75">
-                    {safeStr(form.socials.facebook, "Facebook vacío")}
-                  </p>
-                  <p className="mt-1 break-all text-sm text-white/75">
-                    {safeStr(form.socials.instagram, "Instagram vacío")}
-                  </p>
-                  <p className="mt-1 break-all text-sm text-white/75">
-                    {safeStr(form.socials.youtube, "YouTube vacío")}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">
-                    Flags
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold">
-                      {form.promo_active ? "Promo activa" : "Promo inactiva"}
-                    </span>
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold">
-                      {form.maintenance_mode ? "Mantenimiento ON" : "Mantenimiento OFF"}
-                    </span>
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold">
-                      {form.theme.particles ? "VFX ON" : "VFX OFF"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">
-                    Último payload recibido
-                  </p>
-                  <pre className="mt-3 overflow-auto rounded-2xl border border-white/10 bg-black/30 p-3 text-[11px] leading-5 text-slate-200">
-{JSON.stringify(
-  {
-    org_id: form.org_id || settings?.org_id || null,
-    hero_title: form.hero_title,
-    promo_active: form.promo_active,
-    maintenance_mode: form.maintenance_mode,
-    season_key: form.season_key,
-  },
-  null,
-  2
-)}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          </div>
+    <Shell>
+      <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(8,18,34,0.96),rgba(7,12,20,0.98))] shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+        <div className="pointer-events-none absolute inset-0 opacity-80">
+          <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-sky-500/10 blur-3xl" />
+          <div className="absolute right-0 top-10 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
+          <div className="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-rose-500/10 blur-3xl" />
         </div>
-      </section>
-    </main>
-  );
-}
+
+        <div className="relative z-10 border-b border-white/10 px-5 py-5 md:px-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="unicos-brand-frame h-14 w-14 overflow-hidden rounded-[18px] p-2">
+                <Image
+                  src="/logo-unico.png"
+                  alt="UnicOs"
+                  width={56}
+                  height={56}
+                  className="h-full w-full rounded-[14px] object-contain"
+                  priority
+                />
+              </div>
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-sky-300">
+                  Ajustes premium
+                </p>
+                <h1 className="mt-1 text-3xl font-black tracking-tight text-white md:text-4xl">
+                  Score Store Settings
+                </h1>
+                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
+                  Hero, promociones, mantenimiento, branding, notas del sitio y contacto público, todo sincronizado con Score Store.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Pill tone="blue">
+                <ShieldCheck size={12} />
+                {status}
+              </Pill>
+              <Pill tone={form.promo_active ? "emerald" : "amber"}>
+                {form.promo_active ? <ToggleRight size={12} /> : <ToggleLeft size={12} />}
+                Promo {form.promo_active ? "activa" : "inactiva"}
+              </Pill>
+              <Pill tone={form.maintenance_mode ? "amber" : "emerald"}>
+                <Wand2 size={12} />
+                {form.maintenance_mode ? "Mantenimiento" : "En vivo"}
+              </Pill>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            <a
+              href={scoreStoreHref}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+            >
+              <ExternalLink size={16} />
+              Abrir tienda
+            </a>
+
+            <button
+              type="button"
+              onClick={() => copyText(scoreStoreHref)}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+            >
+              <Copy size={16} />
+              Copiar URL
+            </button>
+
+            <button
+              type="button"
+              onClick={() => load(sessionToken)}
+              disabled={loading || saving}
+              className="inline-flex items-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
+              Recargar
+            </button>
+          </div>
+
+          {copied ? (
+            <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+              {copied}
+            </p>
+          ) : null}
+
+          {error ? (
+            <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+              {error}
+            </p>
+          ) : null}
+
+          {success ? (
+            <p className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+              {success}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="relative z-10 grid grid-cols-1 gap-5 px-5 py-5 lg:grid-cols-[1.05fr_.95fr] md:px-6">
+          <div className
