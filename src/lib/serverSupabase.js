@@ -1,37 +1,63 @@
 import { createClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const url =
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  "";
+
+const serviceKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE ||
+  "";
+
+function getBearerTokenFromRequest(req) {
+  const h = req?.headers?.get?.("authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : "";
+}
 
 export function serverSupabase() {
-  if (!url || !serviceKey) {
-    throw new Error("Supabase no configurado correctamente.");
+  if (!url) {
+    throw new Error("Falta SUPABASE_URL (o NEXT_PUBLIC_SUPABASE_URL) en Vercel.");
+  }
+
+  if (!serviceKey) {
+    throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY (o SUPABASE_SECRET_KEY) en Vercel.");
   }
 
   return createClient(url, serviceKey, {
     auth: {
       persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+    global: {
+      headers: {
+        "x-client-info": "unicos-admin-server",
+      },
     },
   });
 }
 
-export async function getUserFromRequest(req) {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-
+export async function requireUserFromToken(sb, token) {
   if (!token) {
-    return { user: null, error: "Missing token" };
+    return { user: null, error: "Missing Bearer token" };
   }
 
-  const supabase = serverSupabase();
+  const { data, error } = await sb.auth.getUser(token);
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
-
-  if (error || !user) {
-    return { user: null, error: "Invalid token" };
+  if (error || !data?.user) {
+    return { user: null, error: error?.message || "Invalid token" };
   }
 
-  return { user, error: null };
+  return { user: data.user, error: null };
 }
+
+export async function getUserFromRequest(req) {
+  const sb = serverSupabase();
+  const token = getBearerTokenFromRequest(req);
+  return requireUserFromToken(sb, token);
+}
+
+export const createServerSupabase = serverSupabase;
