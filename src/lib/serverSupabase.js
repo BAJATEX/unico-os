@@ -1,49 +1,37 @@
 import { createClient } from "@supabase/supabase-js";
 
-const url =
-  process.env.SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  "";
-
-const serviceKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SECRET_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE ||
-  "";
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export function serverSupabase() {
-  if (!url) {
-    throw new Error("Falta SUPABASE_URL en Vercel.");
-  }
-
-  if (!serviceKey) {
-    throw new Error("Falta SUPABASE_SERVICE_ROLE_KEY en Vercel.");
+  if (!url || !serviceKey) {
+    throw new Error("Supabase no configurado correctamente.");
   }
 
   return createClient(url, serviceKey, {
     auth: {
       persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-    global: {
-      headers: {
-        "x-client-info": "unicos-admin-server",
-      },
     },
   });
 }
 
-export async function requireUserFromToken(sb, token) {
+export async function getUserFromRequest(req) {
+  const token = req.headers.get("authorization")?.replace("Bearer ", "");
+
   if (!token) {
-    return { user: null, error: "Missing Bearer token" };
+    return { user: null, error: "Missing token" };
   }
 
-  const { data, error } = await sb.auth.getUser(token);
+  const supabase = serverSupabase();
 
-  if (error || !data?.user) {
-    return { user: null, error: error?.message || "Invalid token" };
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser(token);
+
+  if (error || !user) {
+    return { user: null, error: "Invalid token" };
   }
 
-  return { user: data.user, error: null };
+  return { user, error: null };
 }
