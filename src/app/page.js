@@ -1,41 +1,32 @@
-// src/app/page.js
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import clsx from "clsx";
 import {
-  BarChart3,
-  Boxes,
   Bot,
+  Boxes,
   CircleDollarSign,
-  Eye,
   Gauge,
   History,
-  Layers3,
   Loader2,
-  PackageSearch,
   RefreshCcw,
-  Search,
+  Send,
   Settings2,
   ShieldCheck,
   ShoppingBag,
   Sparkles,
   Store,
   Truck,
-  Wand2,
-  X,
 } from "lucide-react";
+
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import AiDock from "@/app/ai-dock";
 
+const LOGIN_EMAIL_PLACEHOLDER = "admin@empresa-demo.com";
+
 function safeStr(v, d = "") {
   return typeof v === "string" ? v : v == null ? d : String(v);
-}
-
-function safeNum(v, d = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
 }
 
 function money(v) {
@@ -126,19 +117,19 @@ function LoginScreen({ onLogin, onPasswordLogin, loading, error }) {
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("magic");
 
-  const submitMagic = (e) => {
+  const submitMagic = async (e) => {
     e.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = String(email || "").trim().toLowerCase();
     if (!cleanEmail) return;
-    onLogin(cleanEmail);
+    await onLogin?.(cleanEmail);
   };
 
-  const submitPassword = (e) => {
+  const submitPassword = async (e) => {
     e.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password;
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanPassword = String(password || "");
     if (!cleanEmail || !cleanPassword) return;
-    onPasswordLogin(cleanEmail, cleanPassword);
+    await onPasswordLogin?.(cleanEmail, cleanPassword);
   };
 
   return (
@@ -181,9 +172,15 @@ function LoginScreen({ onLogin, onPasswordLogin, loading, error }) {
                 </p>
 
                 <div className="mt-8 flex flex-wrap gap-2">
-                  <StatusPill ok tone="blue">Acceso seguro</StatusPill>
-                  <StatusPill ok tone="emerald">Panel conectado</StatusPill>
-                  <StatusPill ok tone="blue">Cambios en tiempo real</StatusPill>
+                  <StatusPill ok tone="blue">
+                    Acceso seguro
+                  </StatusPill>
+                  <StatusPill ok tone="emerald">
+                    Panel conectado
+                  </StatusPill>
+                  <StatusPill ok tone="blue">
+                    Cambios en tiempo real
+                  </StatusPill>
                 </div>
               </div>
             </div>
@@ -236,7 +233,7 @@ function LoginScreen({ onLogin, onPasswordLogin, loading, error }) {
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="contacto.hocker@gmail.com"
+                    placeholder={LOGIN_EMAIL_PLACEHOLDER}
                     className="unicos-input w-full rounded-2xl px-4 py-4 text-sm outline-none"
                   />
                 </label>
@@ -289,24 +286,9 @@ function LoginScreen({ onLogin, onPasswordLogin, loading, error }) {
   );
 }
 
-function MiniStat({ icon, label, value, hint }) {
-  return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sky-200">{icon}</div>
-        <div className="text-right">
-          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">{label}</p>
-          <p className="mt-2 text-xl font-black text-white">{value}</p>
-          {hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
+function DashboardView({ token, orgId, role, orgName, onGoSettings, onLogout }) {
   const [health, setHealth] = useState(null);
-  const [audit, setAudit] = useState([]);
+  const [auditRows, setAuditRows] = useState([]);
   const [auditBusy, setAuditBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiInput, setAiInput] = useState("");
@@ -338,9 +320,9 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Desincronización de actividad.");
-      setAudit(j.rows || []);
+      setAuditRows(j.rows || []);
     } catch {
-      setAudit([]);
+      setAuditRows([]);
     } finally {
       setAuditBusy(false);
     }
@@ -351,7 +333,7 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
     loadAudit();
   }, [loadHealth, loadAudit]);
 
-  const filteredAudit = useMemo(() => audit.slice(0, 12), [audit]);
+  const filteredAudit = useMemo(() => auditRows.slice(0, 12), [auditRows]);
 
   const sendAi = async () => {
     const msg = aiInput.trim();
@@ -364,7 +346,20 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
       const res = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: msg, organization_id: orgId }),
+        body: JSON.stringify({
+          message: msg,
+          organization_id: orgId,
+          context: {
+            currentProduct: "",
+            currentSku: "",
+            cartItems: "",
+            cartTotal: "",
+            shipMode: "",
+            orderId: "",
+            actionHint: "Respuesta operativa para UnicOs",
+            category: "",
+          },
+        }),
       });
 
       const j = await res.json().catch(() => ({}));
@@ -380,8 +375,6 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
       setAiBusy(false);
     }
   };
-
-  if (!token) return null;
 
   return (
     <div className="min-h-screen px-4 py-6 unicos-shell animate-unicos-slide-up">
@@ -424,22 +417,51 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
                 <Settings2 size={16} />
                 Ajustes
               </button>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100 hover:bg-rose-500/15"
+              >
+                Cerrar sesión
+              </button>
             </div>
           </div>
         </Panel>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          <MiniStat icon={<Gauge size={18} />} label="Estado" value={health?.ready ? "Listo" : "Revisar"} hint="Entorno / llaves" />
-          <MiniStat icon={<Boxes size={18} />} label="Auditoría" value={audit.length} hint="Últimos registros" />
-          <MiniStat icon={<ShieldCheck size={18} />} label="Acceso" value={role || "viewer"} hint="Permisos" />
-          <MiniStat icon={<Store size={18} />} label="Tienda" value="Score Store" hint="Conectada" />
+          <MetricCard
+            icon={<Gauge size={18} />}
+            label="Estado"
+            value={health?.ready ? "Listo" : "Revisar"}
+            hint="Entorno / llaves"
+          />
+          <MetricCard
+            icon={<Boxes size={18} />}
+            label="Auditoría"
+            value={auditRows.length}
+            hint="Últimos registros"
+          />
+          <MetricCard
+            icon={<ShieldCheck size={18} />}
+            label="Acceso"
+            value={role || "viewer"}
+            hint="Permisos"
+          />
+          <MetricCard
+            icon={<Store size={18} />}
+            label="Tienda"
+            value="Score Store"
+            hint="Conectada"
+          />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_.95fr] gap-5">
           <Panel className="p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Salud del sistema</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                  Salud del sistema
+                </p>
                 <h3 className="mt-2 text-2xl font-black text-white">Variables y estado</h3>
               </div>
               <button
@@ -453,9 +475,31 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
             </div>
 
             <div className="mt-5 grid gap-3">
-              <HealthBadge label="Supabase" status={health?.env?.NEXT_PUBLIC_SUPABASE_URL ? "ok" : "bad"} />
-              <HealthBadge label="Auth pública" status={health?.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "ok" : "bad"} />
-              <HealthBadge label="Service role" status={health?.env?.SUPABASE_SECRET_KEY ? "ok" : "bad"} />
+              <HealthBadge
+                label="Supabase público"
+                status={
+                  health?.env?.NEXT_PUBLIC_SUPABASE_URL &&
+                  (health?.env?.NEXT_PUBLIC_SUPABASE_PUBLIC_KEY ||
+                    health?.env?.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+                    health?.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+                    ? "ok"
+                    : "bad"
+                }
+              />
+              <HealthBadge
+                label="Auth público"
+                status={
+                  health?.env?.NEXT_PUBLIC_SUPABASE_PUBLIC_KEY ||
+                  health?.env?.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+                  health?.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY
+                    ? "ok"
+                    : "bad"
+                }
+              />
+              <HealthBadge
+                label="Service role"
+                status={health?.env?.SUPABASE_SECRET_KEY ? "ok" : "bad"}
+              />
               <HealthBadge label="Stripe" status={health?.env?.STRIPE_SECRET_KEY ? "ok" : "bad"} />
               <HealthBadge label="Envía" status={health?.env?.ENVIA_API_KEY ? "ok" : "bad"} />
               <HealthBadge label="Gemini" status={health?.env?.GEMINI_API_KEY ? "ok" : "bad"} />
@@ -470,7 +514,9 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
           <Panel className="p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Actividad</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                  Actividad
+                </p>
                 <h3 className="mt-2 text-2xl font-black text-white">Últimos eventos</h3>
               </div>
               <button
@@ -516,7 +562,9 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
           <Panel className="p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">IA operativa</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                  IA operativa
+                </p>
                 <h3 className="mt-2 text-2xl font-black text-white">UnicOs AI Dock</h3>
               </div>
               <Bot className="text-sky-300" size={20} />
@@ -557,6 +605,7 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
                 type="button"
                 onClick={sendAi}
                 className="unicos-btn rounded-2xl bg-sky-500 px-4 py-3 text-sm font-black text-slate-950"
+                aria-label="Enviar a IA"
               >
                 <Send size={16} />
               </button>
@@ -566,7 +615,9 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
           <Panel className="p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Acciones rápidas</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                  Acciones rápidas
+                </p>
                 <h3 className="mt-2 text-2xl font-black text-white">Conexión con Score Store</h3>
               </div>
               <Sparkles className="text-cyan-300" size={20} />
@@ -608,7 +659,7 @@ function DashboardView({ token, orgId, role, orgName, onGoSettings }) {
                   <p className="font-black text-white">Sincronización</p>
                 </div>
                 <p className="mt-3 text-sm text-slate-300 leading-relaxed">
-                  UnicOs queda enlazado con Score Store por Supabase compartido, /api/me, /api/score/site-settings, auditoría, AI y servicios de Stripe/Envía.
+                  UnicOs queda enlazado con Score Store por Supabase compartido, `/api/me`, `audit`, IA y servicios de Stripe/Envía.
                 </p>
               </Card>
             </div>
@@ -735,28 +786,31 @@ export default function Page() {
     }
   }, []);
 
-  const handlePasswordLogin = useCallback(async (emailToLogin, password) => {
-    if (!supabase) return;
+  const handlePasswordLogin = useCallback(
+    async (emailToLogin, password) => {
+      if (!supabase) return;
 
-    try {
-      setAuthLoading(true);
-      setGlobalError("");
+      try {
+        setAuthLoading(true);
+        setGlobalError("");
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email: emailToLogin,
-        password,
-      });
+        const { error } = await supabase.auth.signInWithPassword({
+          email: emailToLogin,
+          password,
+        });
 
-      if (error) throw error;
+        if (error) throw error;
 
-      await loadSessionAndOrg();
-      setGlobalError("Acceso confirmado. Sincronizando panel...");
-    } catch (e) {
-      setGlobalError(String(e?.message || e));
-    } finally {
-      setAuthLoading(false);
-    }
-  }, [loadSessionAndOrg]);
+        await loadSessionAndOrg();
+        setGlobalError("Acceso confirmado. Sincronizando panel...");
+      } catch (e) {
+        setGlobalError(String(e?.message || e));
+      } finally {
+        setAuthLoading(false);
+      }
+    },
+    [loadSessionAndOrg]
+  );
 
   const handleLogout = useCallback(async () => {
     try {
@@ -791,6 +845,7 @@ export default function Page() {
                 width={80}
                 height={80}
                 className="h-full w-full object-contain rounded-[18px]"
+                priority
               />
             </div>
             <p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-300">
@@ -836,7 +891,6 @@ export default function Page() {
                   onClick={() => setView("dashboard")}
                   className="unicos-btn inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white hover:bg-white/10"
                 >
-                  <Eye size={16} />
                   Volver al panel
                 </button>
 
@@ -862,22 +916,13 @@ export default function Page() {
   }
 
   return (
-    <>
-      <DashboardView
-        token={sessionToken}
-        orgId={orgId}
-        role={role}
-        orgName={orgName}
-        onGoSettings={() => setView("settings")}
-      />
-
-      <button
-        type="button"
-        onClick={handleLogout}
-        className="unicos-btn fixed bottom-4 right-4 z-50 rounded-[18px] border border-white/10 bg-[rgba(8,18,34,0.88)] px-5 py-3 text-xs font-black text-white shadow-2xl hover:bg-[rgba(8,18,34,0.95)] hover:border-rose-400/20 hover:text-rose-200"
-      >
-        Cerrar sesión
-      </button>
-    </>
+    <DashboardView
+      token={sessionToken}
+      orgId={orgId}
+      role={role}
+      orgName={orgName}
+      onGoSettings={() => setView("settings")}
+      onLogout={handleLogout}
+    />
   );
 }
