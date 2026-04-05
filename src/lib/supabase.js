@@ -1,28 +1,11 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from '@supabase/supabase-js';
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+[span_3](start_span)// Corregido: Prioriza el JWT largo (ANON) del PDF[span_3](end_span)
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-if (!url || !anonKey) {
-  throw new Error("Faltan variables de entorno de Supabase");
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing Supabase environment variables. Check Vercel settings.');
 }
 
-/**
- * Cliente público (browser):
- * - SOLO anon key
- * - Requiere RLS en Supabase
- */
-export const supabase = createClient(url, anonKey, {
-  global: {
-    headers: {
-      "x-client-info": "unicos-admin-web",
-    },
-  },
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
-
-export const SUPABASE_CONFIGURED = true;
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
