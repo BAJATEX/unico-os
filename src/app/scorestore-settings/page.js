@@ -1,4 +1,3 @@
-// src/app/scorestore-settings/page.js
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -26,6 +25,7 @@ import {
   Truck,
   Wand2,
 } from "lucide-react";
+
 import { supabase } from "@/lib/supabase";
 
 const SCORESTORE_URL =
@@ -130,7 +130,12 @@ function Pill({ children, tone = "blue" }) {
   };
 
   return (
-    <span className={clsx("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em]", styles[tone] || styles.blue)}>
+    <span
+      className={clsx(
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em]",
+        styles[tone] || styles.blue
+      )}
+    >
       {children}
     </span>
   );
@@ -144,16 +149,17 @@ function Field({ label, value, onChange, placeholder = "", type = "text", hint =
         {hint ? <span className="text-[10px] font-bold text-slate-500">{hint}</span> : null}
       </div>
       <div className="relative">
-        {Icon ? <Icon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} /> : null}
+        {Icon ? (
+          <Icon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+        ) : null}
         <input
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={clsx(
-            "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition",
-            Icon ? "pl-10" : "",
-            "placeholder:text-slate-500 focus:border-sky-400/40 focus:bg-white/7"
+            "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-sky-400/40 focus:bg-white/7",
+            Icon ? "pl-10" : ""
           )}
         />
       </div>
@@ -190,7 +196,14 @@ function Toggle({ label, value, onChange, hint = "" }) {
         <p className="text-sm font-black text-white">{label}</p>
         {hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
       </div>
-      <span className={clsx("flex items-center gap-2 rounded-full px-3 py-2 text-xs font-black", value ? "bg-emerald-500/15 text-emerald-100 border border-emerald-400/20" : "bg-white/5 text-slate-300 border border-white/10")}>
+      <span
+        className={clsx(
+          "flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-black",
+          value
+            ? "border-emerald-400/20 bg-emerald-500/15 text-emerald-100"
+            : "border-white/10 bg-white/5 text-slate-300"
+        )}
+      >
         {value ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
         {value ? "ON" : "OFF"}
       </span>
@@ -253,7 +266,6 @@ export default function ScorestoreSettingsPage() {
 
   const previewUrl = SCORESTORE_URL || "https://scorestore.vercel.app";
   const heroPreview = form.hero_title || "SCORE STORE";
-  const activeTheme = form.theme?.accent || "#e10600";
 
   const copyText = useCallback(async (value) => {
     try {
@@ -561,4 +573,361 @@ export default function ScorestoreSettingsPage() {
         </div>
 
         <div className="relative z-10 grid grid-cols-1 gap-5 px-5 py-5 lg:grid-cols-[1.05fr_.95fr] md:px-6">
-          <div className
+          <div className="space-y-5">
+            <Panel className="p-5 md:p-6">
+              <SectionTitle
+                eyebrow="Brand / Public Hero"
+                title="Identidad principal"
+                subtitle="Define el encabezado público, la imagen hero y la clave de temporada que verán los clientes."
+                icon={Settings2}
+              />
+
+              <div className="mt-6 grid gap-4">
+                <Field
+                  label="Org ID"
+                  value={form.org_id}
+                  onChange={(v) => updateField(null, "org_id", v)}
+                  placeholder="1f3b9980-a1c5-4557-b4eb-a75bb9a8aaa6"
+                  hint="Multi-tenant"
+                />
+                <Field
+                  label="Hero title"
+                  value={form.hero_title}
+                  onChange={(v) => updateField(null, "hero_title", v)}
+                  placeholder="SCORE STORE"
+                  icon={Sparkles}
+                />
+                <Field
+                  label="Hero image"
+                  value={form.hero_image}
+                  onChange={(v) => updateField(null, "hero_image", v)}
+                  placeholder="/images/hero.jpg"
+                  hint="URL o ruta"
+                />
+                <Field
+                  label="Season key"
+                  value={form.season_key}
+                  onChange={(v) => updateField(null, "season_key", v)}
+                  placeholder="default"
+                  icon={Wand2}
+                />
+              </div>
+            </Panel>
+
+            <Panel className="p-5 md:p-6">
+              <SectionTitle
+                eyebrow="Promos / Maintenance"
+                title="Mensajes visibles"
+                subtitle="Activa promociones o mantenimiento sin tocar código."
+                icon={ShieldCheck}
+              />
+
+              <div className="mt-6 grid gap-3">
+                <Toggle
+                  label="Promoción activa"
+                  value={!!form.promo_active}
+                  onChange={(v) => updateField(null, "promo_active", v)}
+                  hint="Muestra banners y mensajes promocionales."
+                />
+                <Toggle
+                  label="Modo mantenimiento"
+                  value={!!form.maintenance_mode}
+                  onChange={(v) => updateField(null, "maintenance_mode", v)}
+                  hint="Bloquea o advierte la experiencia pública."
+                />
+              </div>
+
+              <div className="mt-4 grid gap-4">
+                <TextArea
+                  label="Promo text"
+                  value={form.promo_text}
+                  onChange={(v) => updateField(null, "promo_text", v)}
+                  placeholder='Ej. "Envío gratis a todo México por tiempo limitado"'
+                  rows={4}
+                  hint="Hero / banners"
+                />
+              </div>
+            </Panel>
+
+            <Panel className="p-5 md:p-6">
+              <SectionTitle
+                eyebrow="Visual / Theme"
+                title="Colores y ambiente"
+                subtitle="Mantén un look fuerte para campañas, home y páginas públicas."
+                icon={Palette}
+              />
+
+              <div className="mt-5 grid gap-3">
+                <Toggle
+                  label="Efectos / partículas"
+                  value={!!form.theme.particles}
+                  onChange={(v) => updateField("theme", "particles", v)}
+                  hint="Activa el ambiente visual"
+                />
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Field
+                  label="Accent"
+                  value={form.theme.accent}
+                  onChange={(v) => updateField("theme", "accent", v)}
+                  placeholder="#e10600"
+                  hint="Color marca"
+                />
+                <Field
+                  label="Accent 2"
+                  value={form.theme.accent2}
+                  onChange={(v) => updateField("theme", "accent2", v)}
+                  placeholder="#111111"
+                  hint="Contraste"
+                />
+              </div>
+            </Panel>
+
+            <Panel className="p-5 md:p-6">
+              <SectionTitle
+                eyebrow="Home / Support"
+                title="Notas públicas"
+                subtitle="Se usan en el footer, soporte, envíos y devoluciones de la tienda."
+                icon={Home}
+              />
+
+              <div className="mt-4 grid gap-4">
+                <TextArea
+                  label="Footer note"
+                  value={form.home.footer_note}
+                  onChange={(v) => updateField("home", "footer_note", v)}
+                  placeholder="Nota de pie de página"
+                  rows={3}
+                />
+                <TextArea
+                  label="Shipping note"
+                  value={form.home.shipping_note}
+                  onChange={(v) => updateField("home", "shipping_note", v)}
+                  placeholder="Nota de envíos"
+                  rows={3}
+                />
+                <TextArea
+                  label="Returns note"
+                  value={form.home.returns_note}
+                  onChange={(v) => updateField("home", "returns_note", v)}
+                  placeholder="Nota de devoluciones"
+                  rows={3}
+                />
+                <TextArea
+                  label="Support hours"
+                  value={form.home.support_hours}
+                  onChange={(v) => updateField("home", "support_hours", v)}
+                  placeholder="Horario de soporte"
+                  rows={3}
+                />
+              </div>
+            </Panel>
+
+            <Panel className="p-5 md:p-6">
+              <SectionTitle
+                eyebrow="Social / Contact"
+                title="Redes y contacto"
+                subtitle="Estos datos se muestran en el sitio y en la atención al cliente."
+                icon={Globe}
+              />
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Field
+                  label="Facebook"
+                  value={form.socials.facebook}
+                  onChange={(v) => updateField("socials", "facebook", v)}
+                  placeholder="URL Facebook"
+                  icon={Globe}
+                />
+                <Field
+                  label="Instagram"
+                  value={form.socials.instagram}
+                  onChange={(v) => updateField("socials", "instagram", v)}
+                  placeholder="URL Instagram"
+                  icon={Globe}
+                />
+                <Field
+                  label="YouTube"
+                  value={form.socials.youtube}
+                  onChange={(v) => updateField("socials", "youtube", v)}
+                  placeholder="URL YouTube"
+                  icon={Globe}
+                />
+                <Field
+                  label="TikTok"
+                  value={form.socials.tiktok}
+                  onChange={(v) => updateField("socials", "tiktok", v)}
+                  placeholder="URL TikTok"
+                  icon={Globe}
+                />
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Field
+                  label="Contact email"
+                  value={form.contact.email}
+                  onChange={(v) => updateField("contact", "email", v)}
+                  placeholder="soporte@tuempresa.com"
+                  icon={Mail}
+                />
+                <Field
+                  label="Contact phone"
+                  value={form.contact.phone}
+                  onChange={(v) => updateField("contact", "phone", v)}
+                  placeholder="+52 664 000 0000"
+                  icon={Phone}
+                />
+                <Field
+                  label="WhatsApp E.164"
+                  value={form.contact.whatsapp_e164}
+                  onChange={(v) => updateField("contact", "whatsapp_e164", v)}
+                  placeholder="5216640000000"
+                  icon={Phone}
+                />
+                <Field
+                  label="WhatsApp display"
+                  value={form.contact.whatsapp_display}
+                  onChange={(v) => updateField("contact", "whatsapp_display", v)}
+                  placeholder="664 000 0000"
+                  icon={Phone}
+                />
+              </div>
+            </Panel>
+
+            <div className="flex flex-wrap gap-3 pb-2">
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={saving || loading}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-500/15 px-5 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                {saving ? "Guardando…" : "Guardar ajustes"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => load(sessionToken)}
+                disabled={saving || loading}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
+                Recargar
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            <Panel className="p-5 md:p-6">
+              <SectionTitle
+                eyebrow="Preview"
+                title="Vista previa de datos"
+                subtitle="Así quedará la identidad pública al sincronizarse con Score Store."
+                icon={Eye}
+              />
+
+              <div className="mt-6 grid gap-3">
+                <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">Hero</p>
+                  <p className="mt-2 text-sm font-bold text-white">{heroPreview}</p>
+                  <p className="mt-2 break-all text-xs text-white/60">
+                    {safeStr(form.hero_image, "Sin imagen")}
+                  </p>
+                </div>
+
+                <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">Contacto</p>
+                  <p className="mt-2 flex items-center gap-2 text-sm font-bold text-white">
+                    <Mail size={14} className="text-sky-300" />
+                    {safeStr(form.contact.email, "—")}
+                  </p>
+                  <p className="mt-2 flex items-center gap-2 text-sm text-white/75">
+                    <Phone size={14} className="text-sky-300" />
+                    {safeStr(form.contact.phone, "—")} · {safeStr(form.contact.whatsapp_display, "—")}
+                  </p>
+                </div>
+
+                <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">Estado</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Pill tone={form.promo_active ? "emerald" : "amber"}>
+                      {form.promo_active ? "Promo visible" : "Promo apagada"}
+                    </Pill>
+                    <Pill tone={form.maintenance_mode ? "amber" : "emerald"}>
+                      {form.maintenance_mode ? "Mantenimiento" : "Producción"}
+                    </Pill>
+                    <Pill tone="blue">
+                      <Sparkles size={12} />
+                      {form.theme.particles ? "Efectos ON" : "Efectos OFF"}
+                    </Pill>
+                  </div>
+                </div>
+
+                <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/45">Theme</p>
+                  <div className="mt-3 flex items-center gap-3">
+                    <span
+                      className="h-10 w-10 rounded-2xl border border-white/10 shadow-lg"
+                      style={{ background: form.theme.accent }}
+                    />
+                    <div>
+                      <p className="text-sm font-bold text-white">{form.theme.accent}</p>
+                      <p className="text-xs text-white/60">{form.theme.accent2}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel className="p-5 md:p-6">
+              <SectionTitle
+                eyebrow="Delivery"
+                title="Estado de sincronización"
+                subtitle="La ruta de ajuste pública sigue siendo `/api/score/site-settings` y ya recibe el token de sesión del browser."
+                icon={Truck}
+              />
+
+              <div className="mt-5 grid gap-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-slate-200">Sesión Supabase</span>
+                    <span
+                      className={clsx(
+                        "text-xs font-black uppercase tracking-[0.16em]",
+                        sessionToken ? "text-emerald-300" : "text-rose-300"
+                      )}
+                    >
+                      {sessionToken ? "Activa" : "Pendiente"}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-slate-200">Loading</span>
+                    <span
+                      className={clsx(
+                        "text-xs font-black uppercase tracking-[0.16em]",
+                        loading ? "text-amber-300" : "text-emerald-300"
+                      )}
+                    >
+                      {loading ? "Cargando" : "Listo"}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold text-slate-200">URL pública</span>
+                    <span className="text-xs font-black uppercase tracking-[0.12em] text-sky-300">
+                      {SCORESTORE_URL.replace(/^https?:\/\//, "")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </Panel>
+          </div>
+        </div>
+      </div>
+    </Shell>
+  );
+}
