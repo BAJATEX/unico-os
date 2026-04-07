@@ -34,6 +34,17 @@ function syncOrgToStorage(orgId) {
   } catch {}
 }
 
+function getAuthErrorFromUrl(url) {
+  const errorCode = url.searchParams.get("error_code");
+  const errorDescription = url.searchParams.get("error_description");
+  const error = url.searchParams.get("error");
+
+  if (errorDescription) return errorDescription;
+  if (errorCode) return errorCode;
+  if (error) return error;
+  return "";
+}
+
 export default function AuthCallbackPage() {
   const router = useRouter();
   const [message, setMessage] = useState("Validando tu acceso...");
@@ -60,6 +71,11 @@ export default function AuthCallbackPage() {
             url.searchParams.get("organization_id") ||
             ""
         ).trim();
+
+        const urlAuthError = getAuthErrorFromUrl(url);
+        if (urlAuthError) {
+          throw new Error(urlAuthError);
+        }
 
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
